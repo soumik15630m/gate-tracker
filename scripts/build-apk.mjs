@@ -16,7 +16,8 @@ if (/[\r\n]/.test(jvmArgs)) throw new Error('STUDYSPACE_GRADLE_JVMARGS must be a
 const properties = readFileSync(propertiesFile, 'utf8');
 const memorySetting = 'org.gradle.jvmargs=' + jvmArgs;
 writeFileSync(propertiesFile, /^org\.gradle\.jvmargs=.*$/m.test(properties) ? properties.replace(/^org\.gradle\.jvmargs=.*$/m, memorySetting) : properties + '\n' + memorySetting + '\n');
-run(process.platform === 'win32' ? 'gradlew.bat' : './gradlew', ['assembleRelease', '-PreactNativeArchitectures=arm64-v8a', '--no-daemon', '--no-parallel', '--max-workers=2'], resolve('android'));
+run(process.platform === 'win32' ? 'gradlew.bat' : './gradlew', [':app:createReleaseUpdatesResources', '--rerun', ':app:assembleRelease', '-PreactNativeArchitectures=arm64-v8a', '--no-daemon', '--no-parallel', '--max-workers=2'], resolve('android'));
+run(process.execPath, ['scripts/verify-native-runtime.cjs']);
 mkdirSync('build', { recursive: true });
 copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'build/studyspace-preview.apk');
 console.log('Android preview APK: ' + resolve('build/studyspace-preview.apk'));
