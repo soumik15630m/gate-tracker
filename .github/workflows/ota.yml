@@ -29,14 +29,18 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.channel) || '["preview","production"]') }}
     env:
       EXPO_NO_TELEMETRY: '1'
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EAS_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
       EXPO_OWNER: ${{ vars.EXPO_OWNER }}
       EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
-      EXPO_UPDATES_CHANNEL: ${{ github.event.inputs.channel || 'production' }}
-      STUDYSPACE_ALLOW_HTTP: ${{ github.event.inputs.channel == 'preview' && '1' || '0' }}
+      EXPO_UPDATES_CHANNEL: ${{ matrix.channel }}
+      STUDYSPACE_ALLOW_HTTP: ${{ matrix.channel == 'preview' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

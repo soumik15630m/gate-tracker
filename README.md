@@ -70,7 +70,7 @@ EAS requires your own Expo account and signing configuration. Use the `store` pr
 
 Repository: [soumik15630m/gate-tracker](https://github.com/soumik15630m/gate-tracker).
 
-The native app includes `expo-updates`. After the one-time setup below, pushes to `main` publish an Android OTA update automatically, after TypeScript and the domain/API tests pass. The app checks on launch and when returning to the foreground, downloads compatible improvements, and loads them on the next launch. **Settings → App updates** also offers a manual check and a save-before-restart action. Updates do not force a restart during study entry.
+The native app includes `expo-updates`. After the one-time setup below, pushes to `main` publish Android OTA updates automatically to both `preview` and `production`, after TypeScript and the domain/API tests pass. The local preview APK receives the `preview` channel, with its matching native configuration. The app checks on launch and when returning to the foreground, downloads compatible improvements, and loads them on the next launch. **Settings → App updates** also offers a manual check and a save-before-restart action. Updates do not force a restart during study entry.
 
 The native runtime uses Expo’s **fingerprint** policy. A JS/UI/asset-only change can update an installed compatible binary. A native dependency, native configuration, or plugin change produces a different runtime and requires a new APK. An existing binary never intentionally loads an update for a different runtime. Keep the built-in Expo error-recovery behaviour enabled.
 
@@ -92,7 +92,7 @@ The native runtime uses Expo’s **fingerprint** policy. A JS/UI/asset-only chan
    npx eas-cli build --platform android --profile production
    ```
 
-7. Push a JS change to `main`, or run **Actions → Android OTA → Run workflow**. The workflow publishes only Android and targets `production` by default. Manual runs can target `preview` instead.
+7. Push a JS change to `main` to publish to both channels, or run **Actions → Android OTA → Run workflow** to publish only the selected channel. Manual runs default to `production` and can target `preview` instead. The workflow publishes only Android.
 
 Until a valid Expo project is configured, local APKs work with embedded code and show an honest “not linked” update state. Adding a project ID later requires installing **one newly configured APK** before that phone can receive OTA. Study/account sync and application-code OTA are separate systems.
 
