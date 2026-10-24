@@ -1,0 +1,8 @@
+{
+  "cli": { "version": ">=16.0.0" },
+  "build": {
+    "preview": { "distribution": "internal", "channel": "preview", "environment": "preview", "env": { "STUDYSPACE_ALLOW_HTTP": "1", "EXPO_UPDATES_CHANNEL": "preview" }, "android": { "buildType": "apk" } },
+    "production": { "distribution": "internal", "channel": "production", "environment": "production", "env": { "EXPO_UPDATES_CHANNEL": "production" }, "android": { "buildType": "apk" } },
+    "store": { "extends": "production", "distribution": "store", "android": { "buildType": "app-bundle" } }
+  }
+}

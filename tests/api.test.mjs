@@ -1,0 +1,31 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createStudyServer } from '../server/index.mjs';
+test('authenticated sync, isolation, idempotency, conflicts, validation, and logout', async t => {
+  const server = createStudyServer({ database: ':memory:' }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function request(path, body, token) { const response = await fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() }; }
+  const auth = await request('/api/auth/register', { email: 'first@example.com', password: 'a-long-test-password' }); assert.equal(auth.status, 200);
+  const second = await request('/api/auth/register', { email: 'second@example.com', password: 'another-test-password' });
+  assert.equal((await request('/api/sync', { cursor: 0, changes: [] })).status, 401);
+  assert.equal((await request('/api/auth/login', { email: 'first@example.com', password: 'incorrect-password' })).status, 401);
+  const change = { id: 'exam', kind: 'exam', data: { id: 'exam', name: 'Exam one', date: '2027-02-07', weeklyTarget: 10, archived: false }, baseVersion: 0, mutationId: 'first-change' };
+  const first = await request('/api/sync', { cursor: 0, changes: [change] }, auth.body.token); assert.equal(first.status, 200); assert.equal(first.body.cursor, 1);
+  const retry = await request('/api/sync', { cursor: 0, changes: [change] }, auth.body.token); assert.equal(retry.body.cursor, 1); assert.equal(retry.body.accepted.length, 1);
+  const isolated = await request('/api/sync', { cursor: 0, changes: [] }, second.body.token); assert.deepEqual(isolated.body.records, []);
+  const conflict = await request('/api/sync', { cursor: 1, changes: [{ ...change, mutationId: 'stale-change', data: { ...change.data, name: 'Stale device' } }] }, auth.body.token); assert.equal(conflict.body.conflicts.length, 1); assert.equal(conflict.body.conflicts[0].remote.data.name, 'Exam one');
+  const invalid = await request('/api/sync', { cursor: 1, changes: [{ ...change, baseVersion: 1, mutationId: 'bad-value', data: { ...change.data, weeklyTarget: -20 } }] }, auth.body.token); assert.equal(invalid.status, 400);
+  const circular = { id: 'topic-a', kind: 'topic', data: { id: 'topic-a', examId: 'exam', parentId: 'topic-a', title: 'Circular', order: 0, confidence: 'unrated', completedOn: null }, mutationId: 'cycle', baseVersion: 0 };
+  assert.equal((await request('/api/sync', { cursor: 1, changes: [circular] }, auth.body.token)).status, 400);
+  const after = await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token); assert.equal(after.body.cursor, 1); assert.equal(after.body.records.length, 1);
+  const parent = { ...circular, id: 'parent', mutationId: 'create-parent', data: { ...circular.data, id: 'parent', parentId: null } }, child = { ...circular, id: 'child', mutationId: 'create-child', data: { ...circular.data, id: 'child', parentId: 'parent' } };
+  const tree = await request('/api/sync', { cursor: 1, changes: [parent, child] }, auth.body.token); assert.equal(tree.status, 200);
+  const changedChild = await request('/api/sync', { cursor: 3, changes: [{ ...child, baseVersion: 3, mutationId: 'other-device-edit', data: { ...child.data, confidence: 'confident' } }] }, auth.body.token); assert.equal(changedChild.body.cursor, 4);
+  const branchDelete = await request('/api/sync', { cursor: 3, changes: [{ ...parent, baseVersion: 2, mutationId: 'delete-parent', deleted: true }, { ...child, baseVersion: 3, mutationId: 'delete-child', deleted: true }] }, auth.body.token);
+  assert.equal(branchDelete.status, 200); assert.equal(branchDelete.body.conflicts.length, 2); assert.equal(branchDelete.body.accepted.length, 0); assert.equal(branchDelete.body.cursor, 4);
+  const parentStillThere = await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token); assert.equal(parentStillThere.body.records.find(r => r.id === 'parent').deleted, false);
+  const resolved = await request('/api/sync', { cursor: 4, changes: branchDelete.body.conflicts.map(c => ({ ...c.local, baseVersion: c.remote.version, mutationId: c.local.mutationId + '-resolved' })) }, auth.body.token); assert.equal(resolved.status, 200); assert.equal(resolved.body.records.filter(r => r.deleted).length, 2);
+  await request('/api/auth/logout', {}, auth.body.token); assert.equal((await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token)).status, 401);
+});

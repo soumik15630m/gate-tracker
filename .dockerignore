@@ -1,0 +1,10 @@
+node_modules
+.expo
+dist
+build
+data
+.env
+.git
+android
+ios
+test-results

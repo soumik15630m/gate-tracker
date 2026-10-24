@@ -1,0 +1,12 @@
+services:
+  studyspace:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - studyspace-data:/data
+    environment:
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3001}
+    restart: unless-stopped
+volumes:
+  studyspace-data:
