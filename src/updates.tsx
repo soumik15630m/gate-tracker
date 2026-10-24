@@ -18,7 +18,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     finally { busy.current = false; setChecking(false); }
   }, [enabled]);
   useEffect(() => { if (!enabled) return; check(); const listener = AppState.addEventListener('change', state => { if (state === 'active' && Date.now() - lastAttempt.current > 5 * 60000) check(); }); return () => listener.remove(); }, [check, enabled]);
-  const apply = useCallback(async () => { try { await study.flush(); await Updates.reloadAsync(); } catch { study.notify('The update could not restart. Your data is saved; close and reopen the app to try again.'); } }, [study.flush, study.notify]);
+  const apply = useCallback(async () => { try { await study.flush(); } catch { study.notify('The app could not save your workspace. Export a backup before restarting.'); return; } try { await Updates.reloadAsync(); } catch { study.notify('Your workspace was saved, but the update could not restart. Close and reopen the app to try again.'); } }, [study.flush, study.notify]);
   return <Context.Provider value={{ enabled, checking: checking || updates.isDownloading, pending: enabled && updates.isUpdatePending, error, checkedAt, check, apply }}>{children}</Context.Provider>;
 }
 export function useAppUpdates() { const state = useContext(Context); if (!state) throw new Error('UpdateProvider is missing.'); return state; }

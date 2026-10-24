@@ -56,6 +56,8 @@ npm run apk
 
 On Windows the helper detects Android Studio’s usual JDK and SDK locations; elsewhere set `JAVA_HOME` and `ANDROID_HOME`. The output is `build/studyspace-preview.apk`, targeting ARM64 phones. This standalone preview includes the native application and its JavaScript bundle, uses the generated development signing key, and permits HTTP for local-network sync. The Android-generated directory is intentionally ignored; Expo regenerates it from the tracked config and plugin.
 
+The local helper limits Gradle to two workers and reserves extra compiler memory for Expo Updates. Set `STUDYSPACE_GRADLE_JVMARGS` to override its JVM memory options for your machine.
+
 For a production release, set `EXPO_PUBLIC_API_URL` to your HTTPS server and configure your own release signing. The production EAS profile leaves cleartext HTTP disabled and builds a signed personal-distribution APK:
 
 ```sh
