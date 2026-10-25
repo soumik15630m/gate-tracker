@@ -58,6 +58,10 @@ class DomainTest {
         assertNull(topic.completedOn); assertEquals("confident", topic.confidence)
         assertThrows(IllegalArgumentException::class.java) { readBackup(codec.encodeToString(Backup.serializer(), Backup(records = records + records.first()))) }
         assertThrows(IllegalArgumentException::class.java) { validate("session", jsonOf(StudySession("bad", exam.id, date = "2026-02-30", minutes = 25))) }
+        validate("exam", jsonOf(exam.copy(description = null)))
+        assertNull(jsonOf(exam.copy(description = null)).asModel<Exam>().description)
+        assertThrows(IllegalArgumentException::class.java) { validate("topic", jsonOf(topic.copy(completedOn = ""))) }
+        assertThrows(IllegalArgumentException::class.java) { validate("topic", jsonOf(topic.copy(reviewOn = " "))) }
     }
     @Test fun `circular and cross exam topic parents are rejected`() {
         val nodes = listOf(topic("one", "two"), topic("two", "one"))

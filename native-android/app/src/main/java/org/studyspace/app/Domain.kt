@@ -26,7 +26,7 @@ fun validDate(day: String) = day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && runCa
 inline fun <reified T> jsonOf(value: T): JsonObject = codec.encodeToJsonElement(value).jsonObject
 inline fun <reified T> JsonObject.asModel(): T = codec.decodeFromJsonElement(this)
 
-@Serializable data class Exam(val id: String, val name: String, val date: String, val weeklyTarget: Double = 20.0, val archived: Boolean = false, val description: String = "")
+@Serializable data class Exam(val id: String, val name: String, val date: String, val weeklyTarget: Double = 20.0, val archived: Boolean = false, val description: String? = "")
 @Serializable data class Topic(val id: String, val examId: String, val parentId: String? = null, val title: String, val order: Double = 0.0, val completedOn: String? = null, val confidence: String = "unrated", val reviewOn: String? = null, val lastReviewedOn: String? = null, val focusOn: String? = null)
 @Serializable data class StudySession(val id: String, val examId: String, val topicId: String? = null, val topicPath: String = "", val date: String, val minutes: Int, val activity: String = "Learning", val note: String = "", val mockId: String? = null)
 @Serializable data class MockSection(val name: String, val score: Double, val maximum: Double)
@@ -165,12 +165,12 @@ fun csv(rows: List<List<Any?>>): String = rows.joinToString("\r\n") { row -> row
 fun validate(kind: String, data: JsonObject) {
     fun id(value: String?) = value != null && value.matches(Regex("[a-zA-Z0-9:_-]{1,180}"))
     fun text(value: String, max: Int = 300, required: Boolean = true) = value.length <= max && (!required || value.isNotBlank())
-    fun date(value: String?) = value.isNullOrBlank() || validDate(value)
+    fun date(value: String?) = value == null || value == "" || validDate(value)
     require(id(data["id"]?.jsonPrimitive?.content)) { "Invalid record identifier." }
     if (kind != "exam" && kind != "preferences") require(id(data["examId"]?.jsonPrimitive?.content)) { "Choose an exam." }
     val valid = when (kind) {
-        "exam" -> data.asModel<Exam>().let { text(it.name) && validDate(it.date) && it.weeklyTarget.isFinite() && it.weeklyTarget in 0.0..168.0 && text(it.description, 1000, false) }
-        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && date(it.completedOn) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) }
+        "exam" -> data.asModel<Exam>().let { text(it.name) && validDate(it.date) && it.weeklyTarget.isFinite() && it.weeklyTarget in 0.0..168.0 && text(it.description.orEmpty(), 1000, false) }
+        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && (it.completedOn == null || validDate(it.completedOn)) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) }
         "session" -> data.asModel<StudySession>().let { (it.topicId == null || id(it.topicId)) && text(it.topicPath, 10000, false) && validDate(it.date) && it.minutes in 1..1440 && it.activity in activityLabels && text(it.note, 10000, false) && (it.mockId == null || id(it.mockId)) }
         "mock" -> data.asModel<MockTest>().let { text(it.name) && text(it.series, 300, false) && validDate(it.date) && it.maximum.isFinite() && it.maximum in 0.01..1e6 && it.score.isFinite() && it.score in -it.maximum..it.maximum && it.minutes in 1..1440 && listOf(it.correct, it.incorrect, it.unattempted).all { n -> n == null || n in 0..1000000 } && it.sections.size <= 200 && it.sections.all { s -> text(s.name) && s.maximum.isFinite() && s.maximum in 0.01..1e6 && s.score.isFinite() && s.score in -s.maximum..s.maximum } && it.mistakes.size <= 300 && it.mistakes.all { m -> (m.topicId == null || id(m.topicId)) && m.category in mistakeLabels && text(m.note, 5000, false) } }
         "task" -> data.asModel<StudyTask>().let { text(it.title, 1000) && it.type in listOf("inbox", "milestone") && date(it.date) && (it.topicId == null || id(it.topicId)) }
