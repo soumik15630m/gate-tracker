@@ -4,8 +4,58 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DomainTest {
+    @Test fun `stopwatch excludes pauses restores running time and rounds only when logging`() {
+        val paused = StudyTimer("timer", startedAt = 1000).pause(61000)
+        assertEquals(60000L, paused.elapsed(500000))
+        val running = paused.resume(500000)
+        assertEquals(running, running.resume(600000))
+        val restored = codec.decodeFromString<StudyTimer>(codec.encodeToString(StudyTimer.serializer(), running))
+        val finished = restored.pause(620000)
+        assertEquals(180000L, finished.elapsed(999999)); assertEquals(3, finished.minutes())
+        assertEquals(finished, finished.pause(999999)); assertEquals("00:03:00", timerClock(finished.elapsed()))
+        assertEquals(50L, StudyTimer("clock", 50, 1000).elapsed(0))
+        assertEquals(1, StudyTimer("short", 29000).minutes()); assertEquals(2, StudyTimer("round", 90000).minutes())
+        assertEquals(1500, StudyTimer("long", 25 * 3600000L).minutes())
+    }
+
+    @Test fun `smart search finds nested topics by typo prefix and ancestor context with independent ratings`() {
+        val root = Topic("search-root", "exam", title = "Computer Networks", importance = 3)
+        val parent = Topic("search-parent", "exam", root.id, "Data communication", importance = 2)
+        val leaf = Topic("search-leaf", "exam", parent.id, "Packet switching", importance = 5)
+        val na = Topic("search-na", "exam", root.id, "Not rated")
+        val index = TopicIndex(listOf(root, parent, leaf, na)); val search = index.smartSearch
+        assertEquals(leaf.id, search.results("packet swithcing").first().topic.id)
+        assertEquals(leaf.id, search.results("swit pack").first().topic.id)
+        assertEquals(leaf.id, search.results("networks packet").first().topic.id)
+        assertEquals(listOf(leaf.id), search.results("", TopicFilter("5")).map { it.topic.id })
+        assertEquals(listOf(root.id), search.results("", TopicFilter("3", "subject")).map { it.topic.id })
+        assertEquals(setOf(leaf.id, na.id), search.results("", TopicFilter("3", "leaf", "subject")).map { it.topic.id }.toSet())
+        assertEquals(listOf(leaf.id), search.results("", TopicFilter("2", "leaf", "parent")).map { it.topic.id })
+        assertEquals(5, leaf.importance); assertEquals(3, root.importance)
+    }
     private val exam = Exam("exam", "GATE", "2027-02-07")
     private fun topic(id: String, parent: String? = null, date: String? = null) = Topic(id, exam.id, parent, id, completedOn = date)
+    @Test fun `importance supports independent NA and one to five stars with exact and minimum filters`() {
+        val root = topic("root").copy(importance = 5); val child = topic("child", "root")
+        assertEquals("N/A", importanceLabel(child.importance)); assertTrue(matchesImportance(child, "na")); assertFalse(matchesImportance(child, "4+"))
+        assertTrue(matchesImportance(root, "5")); assertTrue(matchesImportance(root, "4+")); assertFalse(matchesImportance(root, "na"))
+        (1..5).forEach { validate("topic", jsonOf(child.copy(importance = it))) }
+        listOf(0, -1, 6).forEach { value -> assertThrows(IllegalArgumentException::class.java) { validate("topic", jsonOf(child.copy(importance = value))) } }
+        validate("topic", jsonOf(child.copy(importance = null)))
+    }
+    @Test fun `legacy JSON backups survive unchanged and importance edits preserve prior progress`() {
+        val original = topic("legacy", date = "2026-10-24").copy(confidence = "confident", lectureCount = 10, testCount = 2, lectureIds = listOf(1, 2), testIds = listOf(1), reviewOn = "2026-10-26")
+        val legacyJson = kotlinx.serialization.json.JsonObject(jsonOf(original).filterKeys { it != "importance" })
+        val records = listOf(BackupRecord("exam", jsonOf(exam)), BackupRecord("topic", legacyJson), BackupRecord("session", jsonOf(StudySession("old-session", exam.id, original.id, date = "2026-10-24", minutes = 45))))
+        val source = codec.encodeToString(Backup.serializer(), Backup(records = records))
+        assertEquals(records, readBackup(source)); assertNull(legacyJson.asModel<Topic>().importance)
+        listOf(5, 2, null).forEach { stars ->
+            val edited = legacyJson.asModel<Topic>().copy(importance = stars)
+            assertEquals(original, edited.copy(importance = null)); assertEquals(stars, jsonOf(edited).asModel<Topic>().importance)
+            val backup = Backup(records = records.map { if (it.kind == "topic") it.copy(data = jsonOf(edited)) else it })
+            assertEquals(backup.records, readBackup(codec.encodeToString(Backup.serializer(), backup)))
+        }
+    }
     @Test fun `subject content is derived from numbered allocations and reopening releases it`() {
         val root = topic("root").copy(lectureCount = 10, testCount = 3)
         val one = topic("one", "root", "2026-10-22").copy(lectureIds = listOf(1, 2), testIds = listOf(1))

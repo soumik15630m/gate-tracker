@@ -50,7 +50,7 @@ enum class Screen(val title: String) { TODAY("Today"), SYLLABUS("Syllabus"), LOG
 sealed interface Editor {
     data class ExamForm(val value: Exam? = null) : Editor
     data class TopicForm(val value: Topic? = null, val parent: String? = null) : Editor
-    data class LogForm(val value: StudySession? = null, val topic: String? = null) : Editor
+    data class LogForm(val value: StudySession? = null, val topic: String? = null, val timer: StudyTimer? = null, val timerScope: String? = null) : Editor
     data class MockForm(val value: MockTest? = null) : Editor
     data class TaskForm(val value: StudyTask? = null, val type: String = "milestone") : Editor
     data class ReflectionForm(val value: Reflection? = null) : Editor
@@ -91,6 +91,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     val editor = MutableStateFlow<Editor?>(null)
     val busy = MutableStateFlow(false)
     val workingError = MutableStateFlow("")
+    val stopwatch = NativeStopwatch(application, repo.workspace, viewModelScope)
     val updater = NativeUpdater(application)
     var mockDraft: MockDraft? = null
     val workspace = combine(repo.snapshot, selected) { state, selection -> state to selection }
@@ -150,7 +151,8 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
                 Chip("SAMPLE WORKSPACE", selected = true); Spacer(Modifier.width(10.dp)); Body("Start fresh in Settings", Modifier.clickable { vm.screen.value = Screen.SETTINGS })
             }
             if (failure.isNotBlank()) Row(Modifier.fillMaxWidth().background(Palette.danger.copy(alpha = .08f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) { Body(failure, Modifier.weight(1f), Palette.danger, 3); IconAction("Dismiss message", Icons.Outlined.Close) { vm.repo.error.value = "" } }
-            Box(Modifier.weight(1f)) {
+            StudyStopwatch(vm)
+            Box(Modifier.weight(1f).imePadding()) {
                 when (route) {
                     Screen.TODAY -> TodayScreen(workspace, vm)
                     Screen.SYLLABUS -> SyllabusScreen(workspace, vm)

@@ -3,7 +3,10 @@ import { FlatList, Pressable, View } from 'react-native';
 import { Button, C, DateField, Dialog, Input, Meter, Select, T, s } from './ui';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
-import { branchLeaves, completionMutations, contentProgress, descendants, list, subjectFor, topicPath, topicProgress, type Topic } from './core/model';
+import { TopicFilterControls } from './importance';
+import { TopicAutocomplete } from './TopicAutocomplete';
+import type { TopicFilter } from './core/search';
+import { importanceLabel, matchesImportance, branchLeaves, completionMutations, contentProgress, descendants, list, subjectFor, topicPath, topicProgress, type Topic } from './core/model';
 
 export function ContentMeters({ topic, topics }: { topic: Topic; topics: Topic[] }) {
   const progress = contentProgress(topics, topic.id), subject = subjectFor(topics, topic.id);
@@ -45,6 +48,7 @@ export function CompletionForm({ topicId, recordOnly = false, onClose }: { topic
 }
 export function QuickRevisionForm({ onClose }: { onClose: () => void }) {
   const store = useStudy(), w = useWorkspace(), [topicId, setTopic] = useState(''), [date, setDate] = useState(w.today);
+  const [topicFilter, setTopicFilter] = useState<TopicFilter>({});
   const topics = w.topics, topic = topics.find(t => t.id === topicId);
-  return <Dialog open title="Add to your revision queue" onClose={onClose}><Select label="Subject, chapter or subtopic" value={topicId} onChange={setTopic} options={topics.map(t => ({ value: t.id, label: topicPath(topics, t.id) }))} /><DateField label="Revision date" value={date} onChange={setDate} /><Button label="Schedule revision" disabled={!topic} onPress={() => { if (topic) { try { store.commit([{ kind: 'topic', data: { ...topic, reviewOn: date } }], 'Revision scheduled.'); onClose(); } catch (e) { store.notify((e as Error).message); } } }} />{!topics.length && <T muted style={{ marginTop: 16 }}>Add subjects and topics in your syllabus first.</T>}</Dialog>;
+  return <Dialog open title="Add to your revision queue" onClose={onClose}><TopicFilterControls value={topicFilter} onChange={setTopicFilter} /><TopicAutocomplete topics={topics} value={topicId} onChange={setTopic} filter={topicFilter} label="Subject, chapter or subtopic" /><DateField label="Revision date" value={date} onChange={setDate} /><Button label="Schedule revision" disabled={!topic} onPress={() => { if (topic) { try { store.commit([{ kind: 'topic', data: { ...topic, reviewOn: date } }], 'Revision scheduled.'); onClose(); } catch (e) { store.notify((e as Error).message); } } }} />{!topics.length && <T muted style={{ marginTop: 16 }}>Add subjects and topics in your syllabus first.</T>}</Dialog>;
 }

@@ -107,10 +107,11 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
     private suspend fun current(key: String) = withContext(Dispatchers.Default) {
         StudySnapshot(dao.records(key).map { it.wire() }, dao.pending(key).size, dao.conflicts(key).map { it.value() }, dao.meta(key)?.sample ?: false)
     }
-    suspend fun edit(message: String = "Saved", action: (StudySnapshot) -> List<Mutation>) = withContext(Dispatchers.IO) {
+    suspend fun edit(message: String = "Saved", expectedScope: String? = null, action: (StudySnapshot) -> List<Mutation>) = withContext(Dispatchers.IO) {
         initializing?.join()
         writes.withLock {
             val key = activeScope()
+            require(expectedScope == null || expectedScope == key) { "Return to the account where this entry was started." }
             val before = current(key)
             val changes = withContext(Dispatchers.Default) { action(before) }
             if (changes.isNotEmpty()) commitLocked(key, before.records, changes, rememberUndo = true)
@@ -118,7 +119,7 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
         }
         messages.tryEmit(message); scheduleSync()
     }
-    suspend fun commit(changes: List<Mutation>, message: String = "Saved") = edit(message) { changes }
+    suspend fun commit(changes: List<Mutation>, message: String = "Saved", expectedScope: String? = null) = edit(message, expectedScope) { changes }
     private suspend fun commitLocked(key: String, before: List<WireRecord>, changes: List<Mutation>, rememberUndo: Boolean) {
         require(changes.map { it.id }.distinct().size == changes.size) { "The change contains duplicate records." }
         changes.forEach { validate(it.kind, it.data) }

@@ -1,10 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, applyMutations, branchMinutes, canMove, completionMutations, contentProgress, dateKey, emptyState, moveTopicMutations, outlineTopics, parseOutline, planDates, reconcile, streaks, topicProgress, validDate, weekStart, type Change, type Exam, type Session, type Topic } from '../src/core/model';
+import { addDays, applyMutations, branchMinutes, canMove, completionMutations, contentProgress, dateKey, emptyState, importanceLabel, matchesImportance, moveTopicMutations, outlineTopics, parseOutline, planDates, reconcile, streaks, topicProgress, validDate, weekStart, type Change, type Exam, type Session, type Topic } from '../src/core/model';
 import { validateBackup, validateEntity, validateRelationships } from '../shared/validation.mjs';
 const exam: Exam = { id: 'exam', name: 'My exam', date: '2027-02-07', weeklyTarget: 10, archived: false };
 const topic = (id: string, parentId: string | null, completedOn: string | null = null): Topic => ({ id, parentId, completedOn, examId: exam.id, title: id, order: 0, confidence: 'unrated' });
 const session = (date: string, minutes = 60, topicId = 'leaf'): Session => ({ id: date, examId: exam.id, topicId, topicPath: topicId, date, minutes, activity: 'Learning', note: '' });
+
+test('importance is optional, independent at every depth, and filters support exact or minimum stars', () => {
+  const root = { ...topic('root', null), importance: 5 }, child = topic('leaf', 'root');
+  assert.equal(importanceLabel(child.importance), 'N/A');
+  assert.equal(matchesImportance(root, '5'), true); assert.equal(matchesImportance(root, '4+'), true);
+  assert.equal(matchesImportance(child, '4+'), false); assert.equal(matchesImportance(child, 'na'), true);
+  for (const importance of [undefined, null, 1, 2, 3, 4, 5]) assert.ok(validateEntity('topic', { ...child, importance }));
+  for (const importance of [0, -1, 6, 2.5, '5', false]) assert.equal(validateEntity('topic', { ...child, importance }), false);
+  const rated = { ...child, importance: 3 }; assert.equal(matchesImportance(rated, '3'), true); assert.equal(matchesImportance(rated, '4+'), false);
+  assert.equal(matchesImportance(rated, 'all'), true); assert.equal(matchesImportance(rated, 'na'), false);
+});
+
+test('legacy backups remain valid and changing or clearing importance preserves all preparation data', () => {
+  const root = { ...topic('root', null), lectureCount: 12, testCount: 3 }, leaf = { ...topic('leaf', 'root', '2026-10-24'), lectureIds: [1, 2], testIds: [1], confidence: 'confident' as const, reviewOn: '2026-10-26' };
+  const mutations = [{ kind: 'exam' as const, data: exam }, { kind: 'topic' as const, data: root }, { kind: 'topic' as const, data: leaf }, { kind: 'session' as const, data: session('2026-10-24', 45) }];
+  const legacy = { format: 'studyspace', version: 1, records: mutations };
+  assert.deepEqual(validateBackup(legacy), mutations);
+  let state = applyMutations(emptyState(), mutations);
+  const before = structuredClone(state.records);
+  for (const importance of [5, 2, null]) {
+    state = applyMutations(state, [{ kind: 'topic', data: { ...leaf, importance } }]);
+    assert.deepEqual(state.records.exam, before.exam); assert.deepEqual(state.records.root, before.root); assert.deepEqual(state.records['2026-10-24'], before['2026-10-24']);
+    const { importance: saved, ...unchanged } = state.records.leaf.data as Topic;
+    assert.equal(saved, importance); assert.deepEqual(unchanged, leaf);
+    assert.equal(validateBackup({ ...legacy, records: Object.values(state.records) }).length, mutations.length);
+  }
+});
 
 test('subject totals and numbered content roll up without fixed child counts or duplicate credit', () => {
   const root = { ...topic('root', null), lectureCount: 10, testCount: 3 }, a = { ...topic('a', 'root', '2026-10-22'), lectureIds: [1, 2], testIds: [1] }, b = { ...topic('b', 'root'), lectureIds: [2, 3] };

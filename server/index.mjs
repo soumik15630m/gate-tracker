@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdirSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateEntity, validateRelationships } from '../shared/validation.mjs';
+import { preserveTopicImportance, validateEntity, validateRelationships } from '../shared/validation.mjs';
 const scrypt = promisify(derive);
 try { process.loadEnvFile(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const digest = token => createHash('sha256').update(token).digest('hex');
@@ -85,7 +85,8 @@ export function createStudyServer(options = {}) {
               if ((existing?.version || 0) !== change.baseVersion) { conflicts.push({ local: change, remote: existing }); continue; }
               if (existing && existing.kind !== change.kind) throw httpError(400, 'A record cannot change its type.');
               revision++;
-              db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at').run(session.user_id, change.id, change.kind, JSON.stringify(change.data), change.deleted ? 1 : 0, revision, new Date().toISOString());
+              const data = preserveTopicImportance(change.kind, change.data, existing?.data);
+              db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at').run(session.user_id, change.id, change.kind, JSON.stringify(data), change.deleted ? 1 : 0, revision, new Date().toISOString());
               db.prepare('INSERT INTO receipts VALUES(?,?,?,?)').run(session.user_id, change.mutationId, change.id, revision);
               accepted.push({ id: change.id, mutationId: change.mutationId, version: revision });
             }

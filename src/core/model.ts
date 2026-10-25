@@ -2,7 +2,7 @@ export type Kind = 'exam' | 'topic' | 'session' | 'mock' | 'task' | 'reflection'
 export type Confidence = 'unrated' | 'needs-work' | 'getting-there' | 'confident';
 export type Activity = 'Learning' | 'Revision' | 'Practice' | 'Mock test';
 export interface Exam { id: string; name: string; date: string; weeklyTarget: number; archived: boolean; description?: string }
-export interface Topic { id: string; examId: string; parentId: string | null; title: string; order: number; completedOn: string | null; confidence: Confidence; reviewOn?: string; lastReviewedOn?: string; focusOn?: string; lectureCount?: number | null; testCount?: number | null; lectureIds?: number[]; testIds?: number[] }
+export interface Topic { id: string; examId: string; parentId: string | null; title: string; order: number; completedOn: string | null; confidence: Confidence; reviewOn?: string; lastReviewedOn?: string; focusOn?: string; lectureCount?: number | null; testCount?: number | null; lectureIds?: number[]; testIds?: number[]; importance?: number | null }
 export interface Session { id: string; examId: string; topicId: string | null; topicPath: string; date: string; minutes: number; activity: Activity; note: string; mockId?: string }
 export interface MockSection { name: string; score: number; maximum: number }
 export interface Mistake { topicId: string | null; category: 'Concept gap' | 'Recall' | 'Calculation' | 'Misreading' | 'Time pressure'; note: string }
@@ -18,6 +18,14 @@ export interface Change extends Mutation { id: string; baseVersion: number; muta
 export interface Conflict { local: Change; remote: RecordItem }
 export interface LocalState { records: Records; pending: Record<string, Change>; cursor: number; conflicts: Conflict[] }
 export const confidenceNames: Record<Confidence, string> = { unrated: 'Not rated', 'needs-work': 'Needs work', 'getting-there': 'Getting there', confident: 'Confident' };
+export const importanceLabel = (value?: number | null) => value == null ? 'N/A' : `${'★'.repeat(value)} · ${value}/5`;
+export const importanceFilters = [{ value: 'all', label: 'All importance ratings' }, { value: 'na', label: 'N/A · not rated' }, ...[1, 2, 3, 4, 5].map(n => ({ value: String(n), label: `${'★'.repeat(n)} · exactly ${n}` })), { value: '3+', label: '3 stars & above' }, { value: '4+', label: '4 stars & above' }];
+export function matchesImportance(topic: Pick<Topic, 'importance'>, filter: string) {
+  if (filter === 'all') return true;
+  if (filter === 'na') return topic.importance == null;
+  if (topic.importance == null) return false;
+  return filter.endsWith('+') ? topic.importance >= Number(filter.slice(0, -1)) : topic.importance === Number(filter);
+}
 export const activities: Activity[] = ['Learning', 'Revision', 'Practice', 'Mock test'];
 export const mistakeCategories: Mistake['category'][] = ['Concept gap', 'Recall', 'Calculation', 'Misreading', 'Time pressure'];
 export function uid(prefix = 'id') { return `${prefix}_${Date.now().toString(36)}_${Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 9)).join('')}`; }

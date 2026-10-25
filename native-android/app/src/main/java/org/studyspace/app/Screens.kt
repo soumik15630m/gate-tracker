@@ -80,7 +80,11 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
     var query by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable(w.selected) { mutableStateOf(w.index.children[null].orEmpty().map { it.id }.toSet()) }
     var rows by remember { mutableStateOf<List<VisibleTopic>>(emptyList()) }
-    LaunchedEffect(w.index, expanded, query) { if (query.isNotBlank()) delay(130); rows = withContext(Dispatchers.Default) { w.index.visible(expanded, query) } }
+    LaunchedEffect(w.index, expanded, query) { if (query.isNotBlank()) delay(130); rows = withContext(Dispatchers.Default) { if (query.isBlank()) w.index.visible(expanded) else {
+        val included = w.index.smartSearch.results(query, limit = 20000).map { it.topic.id }.toHashSet()
+        w.index.preorder.asReversed().forEach { node -> if (node.id in included) node.parentId?.let(included::add) }
+        w.index.visible(w.index.byId.keys).filter { it.topic.id in included }
+    } } }
     LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.semantics { contentDescription = "Syllabus list"; stateDescription = "${rows.size} topics" }) {
         item(key = "title", contentType = "heading") { PageHeading("The whole picture", "One topic at a time.", "Check off what you finish. Confidence stays independent.") }
         item(key = "actions", contentType = "actions") { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Action("Add topic", Modifier.weight(1f), icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.open(Editor.TopicForm()) }; Action("Import outline", Modifier.weight(1f), secondary = true, icon = Icons.Outlined.PlaylistAdd, enabled = w.examId != null) { vm.open(Editor.ImportOutline()) } } }
@@ -101,6 +105,7 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
                         else if (row.hasChildren) Body("${progress.done}/${progress.total} complete", maxLines = 1)
                         if (progress.minutes > 0) Body(duration(progress.minutes), maxLines = 1)
                     }
+                    ImportanceBadge(topic.importance)
                     val confidenceColor = when (topic.confidence) { "confident" -> Palette.teal; "needs-work" -> Palette.gold; else -> Palette.muted }
                     Text(confidenceLabels[topic.confidence].orEmpty(), color = confidenceColor, fontFamily = Sans, fontSize = 10.sp, modifier = Modifier.clickable { vm.open(Editor.TopicDetail(topic.id)) }.padding(vertical = 3.dp))
                 }
@@ -129,14 +134,23 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
 }
 
 @Composable fun RevisionScreen(w: Workspace, vm: NativeViewModel) {
+    var importance by rememberSaveable { mutableStateOf("all") }
+    var level by rememberSaveable { mutableStateOf("all") }
+    var source by rememberSaveable { mutableStateOf("self") }
+    var query by rememberSaveable { mutableStateOf("") }
     var upcoming by rememberSaveable { mutableStateOf(false) }
-    val queue = remember(w, upcoming) { w.topics.filter { !it.reviewOn.isNullOrBlank() && (upcoming || it.reviewOn <= w.day) }.sortedBy { it.reviewOn } }
+    var queue by remember { mutableStateOf<List<Topic>>(emptyList()) }
+    LaunchedEffect(w, upcoming, importance, level, source, query) { delay(90); queue = withContext(Dispatchers.Default) { w.index.smartSearch.results(query, TopicFilter(importance, level, source), 20000).map { it.topic }.filter { !it.reviewOn.isNullOrBlank() && (upcoming || it.reviewOn <= w.day) }.sortedBy { it.reviewOn } } }
+
     LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { PageHeading("Remember, with intention", "Return a little stronger.", "A calm queue for topics worth revisiting.") }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Chip("Due now", !upcoming) { upcoming = false }; Chip("All scheduled", upcoming) { upcoming = true } } }
-        if (queue.isEmpty()) item { EmptyCard("A little breathing room", "Schedule revision from any topic’s details, or mark a mock-test weak area for review.") }
+        item { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { TopicFilterControls(TopicFilter(importance, level, source)) { importance = it.importance; level = it.level; source = it.source }; Field("Search revision topics", query, { query = it }, hint = "Any topic or parent path") } }
+        if (queue.isEmpty()) item { EmptyCard("A little breathing room", if (importance == "all") "Schedule revision from any topic’s details, or mark a mock-test weak area for review." else "No items with this importance rating in this queue. Change the filter or rate an item in Syllabus.") }
         items(queue, key = { it.id }, contentType = { "revision" }) { topic ->
             Card(title = topic.title, subtitle = w.index.byId[topic.parentId]?.title) {
+                ImportanceBadge(topic.importance)
+                Action("Edit importance", secondary = true) { vm.open(Editor.TopicDetail(topic.id)) }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Chip(if (topic.reviewOn!! < w.day) "Overdue" else if (topic.reviewOn == w.day) "Today" else displayDate(topic.reviewOn), selected = true, color = if (topic.reviewOn < w.day) Palette.gold else Palette.teal); Body(confidenceLabels[topic.confidence].orEmpty()) }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Action("Review & reschedule", Modifier.weight(1f)) { vm.open(Editor.Review(topic.id)) }; IconAction("Log revision time", Icons.Outlined.AddCircleOutline, Palette.sage) { vm.open(Editor.LogForm(topic = topic.id)) } }
             }

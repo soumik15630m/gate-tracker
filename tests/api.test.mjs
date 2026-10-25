@@ -49,6 +49,21 @@ test('authenticated sync, isolation, idempotency, conflicts, validation, and log
   const roundTrip = await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token);
   assert.deepEqual(roundTrip.body.records.find(r => r.id === completedTopic.id).data.lectureIds, [1, 2, 3]);
   assert.equal(roundTrip.body.records.find(r => r.id === plannedBlock.id).data.notes, plannedBlock.data.notes);
+  const legacyRecord = roundTrip.body.records.find(r => r.id === completedTopic.id);
+  let current = legacyRecord;
+  for (const importance of [5, 2, null]) {
+    const rated = await request('/api/sync', { cursor: 0, changes: [{ ...completedTopic, baseVersion: current.version, mutationId: `importance-${importance}`, data: { ...legacyRecord.data, importance } }] }, auth.body.token);
+    assert.equal(rated.status, 200);
+    current = rated.body.records.find(r => r.id === completedTopic.id);
+    const { importance: saved, ...unchanged } = current.data;
+    assert.equal(saved, importance); assert.deepEqual(unchanged, legacyRecord.data);
+    assert.equal(rated.body.records.length, roundTrip.body.records.length);
+    for (const previous of roundTrip.body.records.filter(r => r.id !== completedTopic.id)) assert.deepEqual(rated.body.records.find(r => r.id === previous.id), previous);
+    const legacyClientEdit = await request('/api/sync', { cursor: 0, changes: [{ ...completedTopic, baseVersion: current.version, mutationId: `older-client-${importance}`, data: legacyRecord.data }] }, auth.body.token);
+    assert.equal(legacyClientEdit.status, 200);
+    current = legacyClientEdit.body.records.find(r => r.id === completedTopic.id);
+    assert.equal(current.data.importance, importance, 'an older client omitting importance must not erase the saved rating');
+  }
   const invalidProgress = { ...completedTopic, id: 'out-of-range', mutationId: 'out-of-range', data: { ...completedTopic.data, id: 'out-of-range', lectureIds: [21] } };
   assert.equal((await request('/api/sync', { cursor: 0, changes: [invalidProgress] }, auth.body.token)).status, 400);
   await request('/api/auth/logout', {}, auth.body.token); assert.equal((await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token)).status, 401);

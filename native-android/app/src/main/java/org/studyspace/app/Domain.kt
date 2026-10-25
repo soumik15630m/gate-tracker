@@ -13,6 +13,15 @@ import kotlin.math.roundToInt
 
 val codec = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = true }
 val confidenceLabels = linkedMapOf("unrated" to "Not rated", "needs-work" to "Needs work", "getting-there" to "Getting there", "confident" to "Confident")
+fun importanceLabel(value: Int?) = if (value == null) "N/A" else "${"★".repeat(value)} · $value/5"
+val importanceFilters = listOf("all" to "All importance ratings", "na" to "N/A · not rated") + (1..5).map { it.toString() to "${"★".repeat(it)} · exactly $it" } + listOf("3+" to "3 stars & above", "4+" to "4 stars & above")
+fun matchesImportance(topic: Topic, filter: String): Boolean = when {
+    filter == "all" -> true
+    filter == "na" -> topic.importance == null
+    topic.importance == null -> false
+    filter.endsWith("+") -> filter.dropLast(1).toIntOrNull()?.let { topic.importance >= it } ?: false
+    else -> topic.importance == filter.toIntOrNull()
+}
 val activityLabels = listOf("Learning", "Revision", "Practice", "Mock test")
 val mistakeLabels = listOf("Concept gap", "Recall", "Calculation", "Misreading", "Time pressure")
 fun uid(prefix: String = "id") = "${prefix}_${UUID.randomUUID()}"
@@ -27,7 +36,7 @@ inline fun <reified T> jsonOf(value: T): JsonObject = codec.encodeToJsonElement(
 inline fun <reified T> JsonObject.asModel(): T = codec.decodeFromJsonElement(this)
 
 @Serializable data class Exam(val id: String, val name: String, val date: String, val weeklyTarget: Double = 20.0, val archived: Boolean = false, val description: String? = "")
-@Serializable data class Topic(val id: String, val examId: String, val parentId: String? = null, val title: String, val order: Double = 0.0, val completedOn: String? = null, val confidence: String = "unrated", val reviewOn: String? = null, val lastReviewedOn: String? = null, val focusOn: String? = null, val lectureCount: Int? = null, val testCount: Int? = null, val lectureIds: List<Int> = emptyList(), val testIds: List<Int> = emptyList())
+@Serializable data class Topic(val id: String, val examId: String, val parentId: String? = null, val title: String, val order: Double = 0.0, val completedOn: String? = null, val confidence: String = "unrated", val reviewOn: String? = null, val lastReviewedOn: String? = null, val focusOn: String? = null, val lectureCount: Int? = null, val testCount: Int? = null, val lectureIds: List<Int> = emptyList(), val testIds: List<Int> = emptyList(), val importance: Int? = null)
 @Serializable data class StudySession(val id: String, val examId: String, val topicId: String? = null, val topicPath: String = "", val date: String, val minutes: Int, val activity: String = "Learning", val note: String = "", val mockId: String? = null)
 @Serializable data class MockSection(val name: String, val score: Double, val maximum: Double)
 @Serializable data class Mistake(val topicId: String? = null, val category: String = "Concept gap", val note: String = "")
@@ -53,6 +62,7 @@ data class VisibleTopic(val topic: Topic, val depth: Int, val progress: Progress
 
 /** An iterative index: one traversal for coverage and time, no recursive UI trees. */
 class TopicIndex(val topics: List<Topic>, sessions: List<StudySession> = emptyList()) {
+    val smartSearch by lazy { TopicSearch(this) }
     val byId = topics.associateBy { it.id }
     val children = topics.groupBy { it.parentId }.mapValues { (_, items) -> items.sortedWith(compareBy<Topic> { it.order }.thenBy { it.title }) }
     val preorder: List<Topic>
@@ -201,7 +211,7 @@ fun validate(kind: String, data: JsonObject) {
     if (kind != "exam" && kind != "preferences") require(id(data["examId"]?.jsonPrimitive?.content)) { "Choose an exam." }
     val valid = when (kind) {
         "exam" -> data.asModel<Exam>().let { text(it.name) && validDate(it.date) && it.weeklyTarget.isFinite() && it.weeklyTarget in 0.0..168.0 && text(it.description.orEmpty(), 1000, false) }
-        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && (it.completedOn == null || validDate(it.completedOn)) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) && count(it.lectureCount) && count(it.testCount) && (it.parentId == null || it.lectureCount == null && it.testCount == null) && contentIds(it.lectureIds) && contentIds(it.testIds) }
+        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && (it.completedOn == null || validDate(it.completedOn)) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) && count(it.lectureCount) && count(it.testCount) && (it.parentId == null || it.lectureCount == null && it.testCount == null) && contentIds(it.lectureIds) && contentIds(it.testIds) && (it.importance == null || it.importance in 1..5) }
         "session" -> data.asModel<StudySession>().let { (it.topicId == null || id(it.topicId)) && text(it.topicPath, 10000, false) && validDate(it.date) && it.minutes in 1..1440 && it.activity in activityLabels && text(it.note, 10000, false) && (it.mockId == null || id(it.mockId)) }
         "mock" -> data.asModel<MockTest>().let { text(it.name) && text(it.series, 300, false) && validDate(it.date) && it.maximum.isFinite() && it.maximum in 0.01..1e6 && it.score.isFinite() && it.score in -it.maximum..it.maximum && it.minutes in 1..1440 && listOf(it.correct, it.incorrect, it.unattempted).all { n -> n == null || n in 0..1000000 } && it.sections.size <= 200 && it.sections.all { s -> text(s.name) && s.maximum.isFinite() && s.maximum in 0.01..1e6 && s.score.isFinite() && s.score in -s.maximum..s.maximum } && it.mistakes.size <= 300 && it.mistakes.all { m -> (m.topicId == null || id(m.topicId)) && m.category in mistakeLabels && text(m.note, 5000, false) } }
         "task" -> data.asModel<StudyTask>().let { text(it.title, 1000) && it.type in listOf("inbox", "milestone", "plan") && date(it.date) && (it.topicId == null || id(it.topicId)) && (it.minutes == null || it.minutes in 1..1440) && (it.activity == null || it.activity in activityLabels) && text(it.notes.orEmpty(), 10000, false) && (it.type != "plan" || validDate(it.date) && it.minutes != null && it.activity != null) }

@@ -12,6 +12,11 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -115,12 +120,14 @@ val Serif = FontFamily(Font(R.font.instrument_serif))
         }
     }
 }
-@Composable fun Field(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, multiline: Boolean = false, numeric: Boolean = false, password: Boolean = false, hint: String = "") {
+@Composable fun Field(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, multiline: Boolean = false, numeric: Boolean = false, password: Boolean = false, hint: String = "", autoFocus: Boolean = false, focusKey: Any? = null, onSubmit: (() -> Unit)? = null) {
+    val focus = remember { FocusRequester() }; val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(autoFocus, focusKey) { if (autoFocus) { withFrameNanos { }; focus.requestFocus(); keyboard?.show() } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, color = Palette.muted, fontSize = 12.sp, fontFamily = Sans)
-        BasicTextField(value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth().testTag(label).semantics { contentDescription = label }.clip(RoundedCornerShape(12.dp)).background(Palette.raised).border(1.dp, Palette.border, RoundedCornerShape(12.dp)).defaultMinSize(minHeight = if (multiline) 100.dp else 50.dp).padding(14.dp),
+        BasicTextField(value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag(label).semantics { contentDescription = label }.clip(RoundedCornerShape(12.dp)).background(Palette.raised).border(1.dp, Palette.border, RoundedCornerShape(12.dp)).defaultMinSize(minHeight = if (multiline) 100.dp else 50.dp).padding(14.dp),
             textStyle = TextStyle(color = Palette.text, fontFamily = Sans, fontSize = 14.sp, lineHeight = 21.sp), cursorBrush = SolidColor(Palette.sage), singleLine = !multiline, maxLines = if (multiline) 7 else 1,
-            keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else if (numeric) KeyboardType.Decimal else KeyboardType.Text), visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else if (numeric) KeyboardType.Decimal else KeyboardType.Text, imeAction = if (onSubmit != null && !multiline) ImeAction.Done else ImeAction.Default), keyboardActions = if (!multiline && onSubmit != null) KeyboardActions(onDone = { keyboard?.hide(); onSubmit() }) else KeyboardActions.Default, visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             decorationBox = { inner -> Box { if (value.isEmpty() && hint.isNotBlank()) Body(hint, color = Palette.muted.copy(alpha = .65f)); inner() } })
     }
 }

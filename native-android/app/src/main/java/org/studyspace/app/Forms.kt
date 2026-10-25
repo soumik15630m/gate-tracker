@@ -14,6 +14,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,13 +24,18 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable fun NativeEditor(editor: Editor, w: Workspace, vm: NativeViewModel) {
-    ModalBottomSheet(onDismissRequest = vm::dismiss, containerColor = Palette.background, contentColor = Palette.text, dragHandle = { Box(Modifier.padding(top = 12.dp, bottom = 8.dp).size(34.dp, 4.dp).background(Palette.border, androidx.compose.foundation.shape.CircleShape)) }) {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(editor) { focus.clearFocus(); keyboard?.hide() }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(sheetState = sheet,onDismissRequest = vm::dismiss, containerColor = Palette.background, contentColor = Palette.text, dragHandle = { Box(Modifier.padding(top = 12.dp, bottom = 8.dp).size(34.dp, 4.dp).background(Palette.border, androidx.compose.foundation.shape.CircleShape)) }) {
         when (editor) {
             is Editor.ExamForm -> ExamEditor(editor, vm)
-            is Editor.TopicForm -> TopicEditor(editor, w, vm)
+            is Editor.TopicForm -> if (editor.value == null) TopicBatchEditor(editor, w, vm) else TopicEditor(editor, w, vm)
             is Editor.LogForm -> SessionEditor(editor, w, vm)
             is Editor.ImportOutline -> OutlineEditor(editor, w, vm)
             is Editor.TopicDetail -> TopicDetails(editor.id, w, vm)
@@ -93,8 +100,12 @@ import kotlinx.coroutines.withContext
     val index by produceState(TopicIndex(emptyList()), w.state.topics, w.state.sessions, examId) { value = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == examId }, w.state.sessions.filter { it.examId == examId }) } }
     return index
 }
-@Composable fun TopicSelector(label: String, index: TopicIndex, selected: String?, onChange: (String?) -> Unit, excluded: Set<String> = emptySet(), rootLabel: String = "General study · no topic") {
+@Composable fun TopicSelector(label: String, index: TopicIndex, selected: String?, onChange: (String?) -> Unit, excluded: Set<String> = emptySet(), rootLabel: String = "General study · no topic", importanceFilterable: Boolean = false) {
+    val pickerScope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
+    var importance by rememberSaveable { mutableStateOf("all") }
+    var level by rememberSaveable { mutableStateOf("all") }
+    var source by rememberSaveable { mutableStateOf("self") }
     var query by rememberSaveable { mutableStateOf("") }
     var nodes by remember { mutableStateOf<List<VisibleTopic>>(emptyList()) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -105,17 +116,21 @@ import kotlinx.coroutines.withContext
         }
     }
     if (open) {
-        LaunchedEffect(index, query, excluded) { delay(100); nodes = withContext(Dispatchers.Default) { index.visible(index.byId.keys, query).filterNot { it.topic.id in excluded } } }
+        LaunchedEffect(index, query, excluded, importance, level, source) { delay(90); nodes = withContext(Dispatchers.Default) { index.smartSearch.results(query, TopicFilter(if (importanceFilterable) importance else "all", level, source), if (query.isBlank()) 20000 else 60).filterNot { it.topic.id in excluded } } }
         Dialog({ open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).padding(18.dp).background(Palette.panel, androidx.compose.foundation.shape.RoundedCornerShape(18.dp)).padding(18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Text("Choose a syllabus level", color = Palette.text, fontFamily = Serif, fontSize = 25.sp, modifier = Modifier.weight(1f)); IconAction("Close topic picker", Icons.Outlined.Close) { open = false } }
-                Field("Search topics", query, { query = it }, hint = "Any subject, topic, or subtopic")
+                if (importanceFilterable) TopicFilterControls(TopicFilter(importance, level, source)) { importance = it.importance; level = it.level; source = it.source }
+                else Choice("Topic level", level, topicLevels) { level = it }
+                Field("Search topics", query, { query = it }, hint = "Type a name / packet switching", autoFocus = true, onSubmit = { val entered = query; pickerScope.launch { val first = withContext(Dispatchers.Default) { index.smartSearch.results(entered, TopicFilter(if (importanceFilterable) importance else "all", level, source), 20000).firstOrNull { it.topic.id !in excluded } }; if (query == entered && first != null) { onChange(first.topic.id); open = false } } })
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 12.dp)) {
                     item(key = "root") { Body(rootLabel, Modifier.fillMaxWidth().clickable { onChange(null); open = false }.padding(vertical = 17.dp), Palette.sage) }
+                    if (nodes.isEmpty()) item { Body("No matching topics. Change your search or importance filter.", Modifier.padding(vertical = 16.dp)) }
                     items(nodes, key = { it.topic.id }, contentType = { "topic-choice" }) { row ->
                         Column(Modifier.fillMaxWidth().clickable { onChange(row.topic.id); open = false }.padding(start = minOf(row.depth * 9, 36).dp, top = 13.dp, bottom = 13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(row.topic.title, color = if (row.topic.id == selected) Palette.sage else Palette.text, fontFamily = Sans, fontSize = 14.sp)
-                            if (row.depth > 0) Body("Level ${row.depth + 1} · ${index.byId[row.topic.parentId]?.title.orEmpty()}", maxLines = 1)
+                            ImportanceBadge(row.topic.importance)
+                            if (row.depth > 0) Body(index.smartSearch.breadcrumb(row.topic.id), maxLines = 2)
                         }
                     }
                 }
@@ -130,26 +145,30 @@ import kotlinx.coroutines.withContext
     var title by rememberSaveable { mutableStateOf(original?.title.orEmpty()) }
     var lectureCount by rememberSaveable { mutableStateOf(original?.lectureCount?.toString().orEmpty()) }
     var testCount by rememberSaveable { mutableStateOf(original?.testCount?.toString().orEmpty()) }
+    var importance by rememberSaveable { mutableStateOf(original?.importance) }
     var confidence by rememberSaveable { mutableStateOf(original?.confidence ?: "unrated") }
     var review by rememberSaveable { mutableStateOf(original?.reviewOn.orEmpty()) }
     var focus by rememberSaveable { mutableStateOf(original?.focusOn == w.day) }
-    val id = rememberSaveable { original?.id ?: uid("topic") }
+    var id by rememberSaveable { mutableStateOf(original?.id ?: uid("topic")) }
     val index = rememberExamIndex(w, exam)
-    EditorFrame(if (original == null) "One more small step." else "Edit this topic.", vm, onSave = {
+    fun saveTopic() {
         vm.perform { vm.repo.edit("Topic saved") { current ->
             val parent = original?.parentId ?: editor.parent
             val order = original?.order ?: ((current.topics.filter { it.examId == exam && it.parentId == parent }.maxOfOrNull { it.order } ?: -1.0) + 1)
-            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(title = title.trim(), confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null, lectureCount = if (parent == null) lectureCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count.") else null, testCount = if (parent == null) testCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count.") else null)
+            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(title = title.trim(), importance = importance, confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null, lectureCount = if (parent == null) lectureCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count.") else null, testCount = if (parent == null) testCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count.") else null)
             listOf(mutation("topic", topic))
-        } }
-    }) {
+        }
+        }
+    }
+    EditorFrame(if (original == null) "One more small step." else "Edit this topic.", vm, onSave = ::saveTopic) {
         if (original == null && editor.parent == null) ExamChoice(w, exam) { exam = it }
         editor.parent?.let { index.byId[it]?.let { parent -> Body("Inside ${parent.title}", color = Palette.sage) } }
-        Field("Topic title", title, { title = it }, hint = "Subject, chapter, or the smallest subtopic")
+        Field("Topic title", title, { title = it }, hint = "Subject, chapter, or the smallest subtopic", autoFocus = true, focusKey = id, onSubmit = { saveTopic() })
         if ((original?.parentId ?: editor.parent) == null) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Lecture count", lectureCount, { lectureCount = it }, Modifier.weight(1f), numeric = true); Field("Test count", testCount, { testCount = it }, Modifier.weight(1f), numeric = true) }
             Body("Totals belong to the subject. Chapter and subtopic progress comes from the lectures/tests you record.")
         }
+        ImportancePicker(importance) { importance = it }
         Choice("Confidence", confidence, confidenceLabels.toList()) { confidence = it }
         DateField("Revision date", review, { review = it }, allowEmpty = true)
         ToggleLine("Add to today’s focus", focus, { focus = it })
@@ -160,21 +179,24 @@ import kotlinx.coroutines.withContext
     val original = editor.value
     var exam by rememberSaveable { mutableStateOf(original?.examId ?: w.state.topics.firstOrNull { it.id == editor.topic }?.examId ?: w.examId.orEmpty()) }
     var topic by rememberSaveable { mutableStateOf(original?.topicId ?: editor.topic) }
-    var hours by rememberSaveable { mutableStateOf(((original?.minutes ?: 60) / 60).toString()) }
-    var minutes by rememberSaveable { mutableStateOf(((original?.minutes ?: 60) % 60).toString()) }
+    var hours by rememberSaveable { mutableStateOf(((original?.minutes ?: editor.timer?.minutes() ?: 60) / 60).toString()) }
+    var minutes by rememberSaveable { mutableStateOf(((original?.minutes ?: editor.timer?.minutes() ?: 60) % 60).toString()) }
     var date by rememberSaveable { mutableStateOf(original?.date ?: w.day) }
     var activity by rememberSaveable { mutableStateOf(original?.activity ?: "Learning") }
-    var note by rememberSaveable { mutableStateOf(original?.note.orEmpty()) }
-    val id = rememberSaveable { original?.id ?: uid("session") }
+    var note by rememberSaveable { mutableStateOf(original?.note ?: editor.timer?.let { "Stopwatch · ${timerClock(it.elapsed())}" }.orEmpty()) }
+    val id = rememberSaveable { original?.id ?: editor.timer?.id ?: uid("session") }
     val index = rememberExamIndex(w, exam)
     EditorFrame("Time, well spent.", vm, onSave = {
         vm.perform {
+            require(editor.timer == null || vm.repo.workspace.value == editor.timerScope) { "Return to the account where this stopwatch was started." }
             val h = hours.toIntOrNull() ?: error("Enter whole hours."); val m = minutes.toIntOrNull() ?: error("Enter whole minutes.")
             require(h >= 0 && m in 0..59 && h * 60 + m in 1..1440) { "Log between 1 minute and 24 hours, with minutes from 0 to 59." }
             val path = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == exam }).path(topic).takeLast(10000) }
-            vm.repo.commit(listOf(mutation("session", StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId))), "Study time logged")
+            vm.repo.commit(listOf(mutation("session", StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId))), "Study time logged", expectedScope = editor.timerScope)
+            editor.timer?.let { vm.stopwatch.consume(it.id, editor.timerScope.orEmpty()) }
         }
     }, onDelete = original?.let { { vm.open(Editor.Delete("session", id)) } }) {
+        if (editor.timer != null) Body("Your stopwatch is paused. Time is rounded to whole minutes; adjust it if needed. Closing keeps your unsaved timer. Create an exam workspace first if you do not have one yet.")
         ExamChoice(w, exam) { exam = it; topic = null }
         TopicSelector("Subject or any syllabus level", index, topic, { topic = it })
         DateField("Study date", date, { date = it })
@@ -214,6 +236,10 @@ import kotlinx.coroutines.withContext
     EditorFrame(topic.title, vm) {
         Body(index.path(id).takeLast(700))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${progress.done}/${progress.total} final items"); Body(duration(progress.minutes), color = Palette.teal) }; Meter(progress.percent)
+        ImportancePicker(topic.importance) { value -> vm.perform(false) { vm.repo.edit("Importance updated") { state ->
+            val current = state.topics.firstOrNull { it.id == id } ?: error("This topic was removed.")
+            listOf(mutation("topic", current.copy(importance = value)))
+        } } }
         ContentMeters(index, id)
         Action("Record lectures / tests", Modifier.fillMaxWidth(), secondary = true) { vm.open(Editor.Completion(id, recordOnly = true)) }
         if (topic.parentId == null) Action("Edit subject totals", Modifier.fillMaxWidth(), secondary = true) { vm.open(Editor.TopicForm(topic)) }
@@ -285,7 +311,7 @@ private fun moveSibling(vm: NativeViewModel, id: String, direction: Int) = vm.pe
         ExamChoice(w, exam) { exam = it; topic = null }
         Field(if (plan) "Study block goal" else if (editor.type == "inbox") "Inbox note" else "Milestone title", title, { title = it }, multiline = true)
         DateField(if (plan) "Study date" else "Target date", date, { date = it }, allowEmpty = !plan)
-        if (editor.type != "inbox") TopicSelector("Linked subject or topic", index, topic, { topic = it })
+        if (editor.type != "inbox") TopicSelector("Linked subject or topic", index, topic, { topic = it }, importanceFilterable = true)
         if (plan) {
             Field("Planned duration · minutes", minutes, { minutes = it }, numeric = true)
             Choice("Activity", activity, activityLabels.map { it to it }) { activity = it }

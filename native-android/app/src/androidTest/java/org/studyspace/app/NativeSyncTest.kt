@@ -27,7 +27,7 @@ class NativeSyncTest {
         try {
             val auth = repo.account.value!!
             val exam = Exam(uid("exam"), "API round trip", "2027-02-07")
-            val topic = Topic(uid("topic"), exam.id, title = "Native topic", confidence = "confident", completedOn = "2026-10-25", lectureCount = 8, testCount = 3, lectureIds = listOf(1, 2), testIds = listOf(1))
+            val topic = Topic(uid("topic"), exam.id, title = "Native topic", confidence = "confident", completedOn = "2026-10-25", lectureCount = 8, testCount = 3, lectureIds = listOf(1, 2), testIds = listOf(1), importance = 4)
             val session = StudySession(uid("session"), exam.id, topic.id, topic.title, "2026-10-25", 25)
             val plan = StudyTask(uid("task"), exam.id, "Practice questions", "plan", "2026-10-26", topicId = topic.id, minutes = 45, activity = "Practice", notes = "Review mistakes afterward")
             repo.commit(listOf(mutation("exam", exam), mutation("topic", topic), mutation("session", session), mutation("task", plan)))
@@ -54,6 +54,7 @@ class NativeSyncTest {
             assertEquals("confident", final.confidence)
             assertEquals("2026-10-25", final.completedOn)
             assertEquals(listOf(1, 2), final.lectureIds)
+            assertEquals(4, final.importance)
         } finally { repo.signOut() }
     }
     private fun api(auth: Account, input: SyncRequest): SyncResult {

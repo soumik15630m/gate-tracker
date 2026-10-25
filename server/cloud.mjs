@@ -2,7 +2,7 @@ import pg from 'pg';
 import { attachDatabasePool } from '@vercel/functions';
 import { randomBytes, scrypt as derive, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { validateEntity, validateRelationships } from '../shared/validation.mjs';
+import { preserveTopicImportance, validateEntity, validateRelationships } from '../shared/validation.mjs';
 
 const scrypt = promisify(derive);
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -150,7 +150,7 @@ export function createCloudHandler(options = {}) {
             for (const change of fresh) {
               if (existing.has(change.id) && existing.get(change.id).kind !== change.kind) throw fail(400, 'A record cannot change its type.');
               revision++;
-              const record = { id: change.id, kind: change.kind, data: change.data, deleted: !!change.deleted, version: revision, changedAt };
+              const record = { id: change.id, kind: change.kind, data: preserveTopicImportance(change.kind, change.data, existing.get(change.id)?.data), deleted: !!change.deleted, version: revision, changedAt };
               existing.set(record.id, record);
               writes.push({ ...record, data: JSON.stringify(record.data), deleted: record.deleted ? 1 : 0, changed_at: changedAt });
               newReceipts.push({ mutation_id: change.mutationId, record_id: change.id, version: revision });

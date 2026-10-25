@@ -7,8 +7,12 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Multiple exam workspaces, countdowns, weekly targets, milestones and archiving.
 - Detailed study plans with dated blocks, syllabus links, activities, planned duration, notes and weekday repeats. Planned effort stays separate from actual study time.
 - Unlimited logical syllabus nesting, partial checklists, automatic closing dates, search, move/reorder/edit, and indented-outline import with preview.
+- Optional 1–5-star importance on every subject and topic, editable anytime and independent of confidence. Revision and planning support exact-star, minimum-star and N/A filters, subject/parent/final-item level filters, and matching an item's own, immediate-parent or subject rating. A five-star child remains discoverable under a three-star parent.
+- Smart topic autocomplete across deep syllabus trees, including typo tolerance, word prefixes, ancestor context and breadcrumb disambiguation. Android searches run off the UI thread; only displayed suggestions assemble breadcrumb labels.
+- Add multiple subjects or sibling child topics as editable rows in one form with a single Save all action. The name field focuses automatically; Enter saves the list, while multiline inputs retain new lines.
 - Subject-only lecture/test totals and a scrollable numbered picker when completing any branch. Selections determine chapter/subtopic counts and roll up to subject progress without duplicate credit.
 - Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision.
+- One-tap stopwatch on every screen, with pause/resume and Finish & log. Choose the exam, subject, any topic depth, activity and notes afterwards. Unsaved timers survive reloads/restarts on that device and are isolated by account/server. Closing the log form retains the paused timer; only saving or confirmed discard clears it. Logs use editable whole-minute rounding and a stable entry ID to avoid duplicate entries on retry.
 - Mock results, section scores, comparable-series trends, mistake journals and optional deduplicated study entries.
 - Streaks, heatmaps, study-time trends, coverage, subject distribution, neglected subjects and approximate completion forecasts.
 - Hover/focus/tap chart details on web, tap study charts on Android, and quick revision scheduling from Today.
@@ -17,6 +21,8 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Native signed-APK update checks, checksum and certificate verification, and Android-approved installation.
 
 The initial local workspace contains **labelled sample data**. Use **Settings → Start fresh** for your own data. A newly created sync account starts empty. Export/import transfers local work into that account.
+
+Importance is an optional JSON field: old records and version 1 backups remain valid and display N/A until rated. Adding ratings does not require a database reset, a Room schema change, or rewriting existing records. Install Android updates over the existing app to retain its private storage; uninstalling or clearing app data removes local storage. Settings provides a JSON export for keeping your own backup copy.
 
 ## Desktop web and sync server
 

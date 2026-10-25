@@ -87,7 +87,7 @@ import kotlinx.coroutines.withContext
         } }
     }) {
         ExamChoice(w, exam) { exam = it; topic = null }
-        TopicSelector("Subject, chapter or subtopic", index, topic, { topic = it })
+        TopicSelector("Subject, chapter or subtopic", index, topic, { topic = it }, importanceFilterable = true)
         DateField("Revision date", date, { date = it })
     }
 }
