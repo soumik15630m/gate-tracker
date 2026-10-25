@@ -1,0 +1,36 @@
+# Tenant isolation review
+
+Reviewed on 25 October 2026. A tenant is one registered user account; sharing a sync-server address does not share a workspace.
+
+## Enforcement
+
+- The server resolves the account from a random bearer token stored as a SHA-256 digest in the sessions table. Client-supplied account identifiers do not select the account.
+- Record reads, writes, tombstones, conflict lookups and mutation receipts include the authenticated `user_id`. Record and receipt primary keys include `user_id`, so accounts can safely use identical IDs, including the fixed `preferences` ID.
+- Syllabus relationships are validated against the caller's records. Another account's exam or parent topic cannot satisfy a relationship.
+- Each account has its own revision counter. PostgreSQL sync locks that user's row inside a transaction.
+- Web cache keys include server and user ID, with an epoch check that discards sync responses after an account switch. Android Room records, outbox, conflicts and recovery points use a scope derived from server and user ID. Android applies an in-flight sync response to its original scope.
+- API responses use `Cache-Control: no-store`. The web service worker excludes API responses.
+
+## Executable checks
+
+`npm run test:api` includes `tests/tenant-isolation.test.mjs`. It exercises the local SQLite handler; the same test can target `createCloudHandler` through the existing isolated PostgreSQL fixture.
+
+Result on the review date: all eight API test cases passed against both SQLite and the isolated PostgreSQL handler, including six tenant-specific subtests. TypeScript checking and all sixteen domain tests also passed. No cross-account access was found in these tested paths. This is not a claim that every possible attack has been excluded.
+
+The suite creates disposable accounts and checks:
+
+1. Missing, modified and fabricated tokens cannot read or write.
+2. User/tenant IDs supplied in headers, request bodies or query parameters cannot select another account.
+3. Guessed record IDs and versions do not leak foreign records through conflict responses.
+4. An exam present only in another account cannot authorize a child topic.
+5. All seven entity types remain separate even with identical record and mutation IDs; retries and revision counters stay account-scoped.
+6. Stale-write responses contain only the caller's data, and deleting all of one account's records leaves the other account unchanged.
+7. Logout revokes the caller's token only; a body cannot select a different token to revoke. Other sessions remain independent.
+
+Cloud tests use a randomly named `studyspace_test_*` schema with a search path that excludes production tables, then remove the schema. No real preparation data or production accounts are used.
+
+## Boundaries
+
+This is application-enforced isolation in shared tables, not database-enforced row-level security. Database administrators and holders of the server's database credentials can access all accounts. A future API query must retain the account filter; the regression suite helps catch omissions but is not a formal proof.
+
+The bearer token grants access to its account. Browser storage on a shared OS/browser profile is not a security boundary against someone who can inspect that profile: account caches are retained after logout for offline continuity. Android account caches likewise remain on the device, while its login token is encrypted with Android Keystore. This review does not claim protection against compromised devices, stolen tokens, or database administrators.
