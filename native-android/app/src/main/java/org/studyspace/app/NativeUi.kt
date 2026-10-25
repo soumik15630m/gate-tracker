@@ -4,6 +4,10 @@ package org.studyspace.app
 import android.app.DatePickerDialog
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -162,10 +166,11 @@ val Serif = FontFamily(Font(R.font.instrument_serif))
 @Composable fun StatPair(left: @Composable (Modifier) -> Unit, right: @Composable (Modifier) -> Unit) { Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) { left(Modifier.weight(1f)); right(Modifier.weight(1f)) } }
 fun LazyListScope.spacer(key: String) { item(key = key, contentType = "space") { Spacer(Modifier.height(4.dp)) } }
 
-@Composable fun TimeBars(values: List<Int>, labels: List<String>, modifier: Modifier = Modifier) {
+@Composable fun TimeBars(values: List<Int>, labels: List<String>, modifier: Modifier = Modifier, dates: List<String> = emptyList(), sessions: List<StudySession> = emptyList(), bucketDays: Int = 1) {
+    var selected by remember { mutableStateOf<String?>(null) }
     val max = values.maxOrNull()?.coerceAtLeast(1) ?: 1
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(128.dp).semantics { contentDescription = "Study time chart: ${values.joinToString()} minutes" }) {
+        Canvas(Modifier.fillMaxWidth().height(128.dp).pointerInput(values, dates) { detectTapGestures { offset -> if (dates.isNotEmpty()) selected = dates.getOrNull((offset.x / (size.width / values.size.coerceAtLeast(1).toFloat())).toInt().coerceIn(0, dates.lastIndex)) } }.semantics { contentDescription = "Study time chart: ${values.joinToString()} minutes" }) {
             val gap = size.width / values.size.coerceAtLeast(1)
             repeat(3) { line -> val y = size.height * line / 3; drawLine(Palette.border, Offset(0f, y), Offset(size.width, y), 1f) }
             values.forEachIndexed { index, value ->
@@ -175,16 +180,25 @@ fun LazyListScope.spacer(key: String) { item(key = key, contentType = "space") {
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { labels.forEach { Text(it, color = Palette.muted, fontFamily = Sans, fontSize = 10.sp) } }
     }
+    selected?.let { day -> StudyDayDialog(day, sessions, bucketDays) { selected = null } }
 }
-@Composable fun ActivityGrid(days: Map<String, Int>, today: String, modifier: Modifier = Modifier) {
+@Composable fun ActivityGrid(days: Map<String, Int>, today: String, modifier: Modifier = Modifier, sessions: List<StudySession> = emptyList()) {
+    var selected by remember { mutableStateOf<String?>(null) }
     val values = remember(days, today) { (90L downTo 0L).map { days[addDays(today, -it)] ?: 0 } }
-    Canvas(modifier.fillMaxWidth().height(110.dp).semantics { contentDescription = "Activity over the past 91 days. ${values.count { it > 0 }} study days." }) {
+    Canvas(modifier.fillMaxWidth().height(110.dp).pointerInput(days, today) {
+        detectTapGestures { offset ->
+            val gap = 4.dp.toPx(); val cell = min((size.width - gap * 12) / 13, (size.height - gap * 6) / 7)
+            val column = (offset.x / (cell + gap)).toInt(); val row = (offset.y / (cell + gap)).toInt()
+            if (column in 0..12 && row in 0..6 && offset.x % (cell + gap) <= cell && offset.y % (cell + gap) <= cell) selected = addDays(today, (column * 7 + row - 90).toLong())
+        }
+    }.semantics { contentDescription = "Activity over the past 91 days. ${values.count { it > 0 }} study days." }) {
         val columns = 13; val gap = 4.dp.toPx(); val cell = min((size.width - gap * (columns - 1)) / columns, (size.height - gap * 6) / 7)
         values.forEachIndexed { index, minutes ->
             val color = when { minutes == 0 -> Palette.border; minutes < 60 -> Palette.teal.copy(alpha = .3f); minutes < 120 -> Palette.teal.copy(alpha = .55f); minutes < 180 -> Palette.teal.copy(alpha = .8f); else -> Palette.teal }
             drawRoundRect(color, Offset(index / 7 * (cell + gap), index % 7 * (cell + gap)), Size(cell, cell), androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()))
         }
     }
+    selected?.let { day -> StudyDayDialog(day, sessions) { selected = null } }
 }
 @Composable fun TrendLine(values: List<Double>, modifier: Modifier = Modifier, color: Color = Palette.teal, maximum: Double = 100.0) {
     Canvas(modifier.fillMaxWidth().height(120.dp).semantics { contentDescription = "Trend: ${values.joinToString { "%.1f".format(it) }}" }) {
@@ -195,4 +209,17 @@ fun LazyListScope.spacer(key: String) { item(key = key, contentType = "space") {
             drawPath(path, color, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round)); coordinates.forEach { drawCircle(color, 3.dp.toPx(), it) }
         }
     }
+}
+
+@Composable private fun StudyDayDialog(day: String, sessions: List<StudySession>, bucketDays: Int = 1, onClose: () -> Unit) {
+    val end = addDays(day, (bucketDays - 1).toLong())
+    val entries = remember(day, end, sessions) { sessions.filter { it.date in day..end } }
+    AlertDialog(onDismissRequest = onClose, containerColor = Palette.panel,
+        title = { Body(if (bucketDays == 1) displayDate(day) else "${displayDate(day)} to ${displayDate(end)}", color = Palette.text) },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Body("${duration(entries.sumOf { it.minutes })} / ${entries.size} study entries", color = Palette.teal)
+            entries.groupBy { it.activity }.forEach { (activity, items) -> Body("$activity / ${duration(items.sumOf { it.minutes })}") }
+            if (entries.isEmpty()) Body("No study time recorded.")
+            LazyColumn(Modifier.heightIn(max = 230.dp)) { items(entries, key = { it.id }) { entry -> Body("${entry.topicPath.ifBlank { "Whole exam" }} / ${duration(entry.minutes)}", Modifier.padding(vertical = 8.dp)) } }
+        } }, confirmButton = { TextButton(onClick = onClose) { Text("Close", color = Palette.sage) } })
 }

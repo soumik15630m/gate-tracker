@@ -2,12 +2,12 @@ export type Kind = 'exam' | 'topic' | 'session' | 'mock' | 'task' | 'reflection'
 export type Confidence = 'unrated' | 'needs-work' | 'getting-there' | 'confident';
 export type Activity = 'Learning' | 'Revision' | 'Practice' | 'Mock test';
 export interface Exam { id: string; name: string; date: string; weeklyTarget: number; archived: boolean; description?: string }
-export interface Topic { id: string; examId: string; parentId: string | null; title: string; order: number; completedOn: string | null; confidence: Confidence; reviewOn?: string; lastReviewedOn?: string; focusOn?: string }
+export interface Topic { id: string; examId: string; parentId: string | null; title: string; order: number; completedOn: string | null; confidence: Confidence; reviewOn?: string; lastReviewedOn?: string; focusOn?: string; lectureCount?: number | null; testCount?: number | null; lectureIds?: number[]; testIds?: number[] }
 export interface Session { id: string; examId: string; topicId: string | null; topicPath: string; date: string; minutes: number; activity: Activity; note: string; mockId?: string }
 export interface MockSection { name: string; score: number; maximum: number }
 export interface Mistake { topicId: string | null; category: 'Concept gap' | 'Recall' | 'Calculation' | 'Misreading' | 'Time pressure'; note: string }
 export interface Mock { id: string; examId: string; name: string; series: string; date: string; score: number; maximum: number; minutes: number; correct?: number; incorrect?: number; unattempted?: number; sections: MockSection[]; mistakes: Mistake[] }
-export interface Task { id: string; examId: string; title: string; type: 'inbox' | 'milestone'; date: string; done: boolean; topicId?: string }
+export interface Task { id: string; examId: string; title: string; type: 'inbox' | 'milestone' | 'plan'; date: string; done: boolean; topicId?: string | null; minutes?: number | null; activity?: Activity | null; notes?: string | null }
 export interface Reflection { id: string; examId: string; week: string; worked: string; improve: string; next: string }
 export interface Preferences { id: 'preferences'; timezone: string; streakMinimum: number; displayName: string }
 export type Entity = Exam | Topic | Session | Mock | Task | Reflection | Preferences;
@@ -36,7 +36,9 @@ export function prettyDate(key: string, year = false) { return validDate(key) ? 
 export function children(topics: Topic[], parentId: string | null) { return topics.filter(t => t.parentId === parentId).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title)); }
 export function descendants(topics: Topic[], id: string): Topic[] {
   const result: Topic[] = [], seen = new Set([id]), queue = [id];
-  while (queue.length) { const parent = queue.pop()!; for (const child of children(topics, parent)) { if (seen.has(child.id)) continue; seen.add(child.id); result.push(child); queue.push(child.id); } }
+  const byParent = new Map<string | null, Topic[]>();
+  for (const topic of topics) { const siblings = byParent.get(topic.parentId) || []; siblings.push(topic); byParent.set(topic.parentId, siblings); }
+  while (queue.length) { const parent = queue.pop()!; for (const child of byParent.get(parent) || []) { if (seen.has(child.id)) continue; seen.add(child.id); result.push(child); queue.push(child.id); } }
   return result;
 }
 export function leaves(topics: Topic[]) { const parents = new Set(topics.map(t => t.parentId)); return topics.filter(t => !parents.has(t.id)); }
@@ -45,6 +47,35 @@ export function topicProgress(topics: Topic[], id?: string) { const items = id ?
 export function topicPath(topics: Topic[], id: string | null) { const path: string[] = [], seen = new Set<string>(); let node = topics.find(t => t.id === id); while (node && !seen.has(node.id)) { seen.add(node.id); path.unshift(node.title); node = topics.find(t => t.id === node!.parentId); } return path.join(' / '); }
 export function canMove(topics: Topic[], id: string, parentId: string | null) { const topic = topics.find(t => t.id === id); if (!topic) return false; if (parentId === null) return true; const parent = topics.find(t => t.id === parentId); return !!parent && parent.examId === topic.examId && parentId !== id && !descendants(topics, id).some(t => t.id === parentId); }
 export function branchMinutes(sessions: Session[], topics: Topic[], id: string) { const ids = new Set([id, ...descendants(topics, id).map(t => t.id)]); return sessions.filter(s => s.topicId && ids.has(s.topicId)).reduce((sum, s) => sum + s.minutes, 0); }
+export function subjectFor(topics: Topic[], id: string) {
+  const byId = new Map(topics.map(t => [t.id, t])), seen = new Set<string>(); let node = byId.get(id);
+  while (node?.parentId && !seen.has(node.id)) { seen.add(node.id); node = byId.get(node.parentId); }
+  return node;
+}
+export function contentProgress(topics: Topic[], id: string) {
+  const nodes = [topics.find(t => t.id === id), ...descendants(topics, id)].filter(Boolean) as Topic[];
+  return { lectures: new Set(nodes.flatMap(t => t.lectureIds || [])), tests: new Set(nodes.flatMap(t => t.testIds || [])) };
+}
+export function moveTopicMutations(topics: Topic[], id: string, parentId: string | null): Mutation[] {
+  if (!canMove(topics, id, parentId)) throw new Error('A topic cannot move inside itself or one of its descendants.');
+  const topic = topics.find(t => t.id === id)!, oldSubject = subjectFor(topics, id), newSubject = parentId ? subjectFor(topics, parentId) : topic;
+  const changingSubject = oldSubject?.id !== newSubject?.id, nodes = [topic, ...descendants(topics, id)];
+  return nodes.filter(t => t.id === id || changingSubject && (t.lectureIds?.length || t.testIds?.length)).map(t => ({ kind: 'topic', data: { ...t, ...(t.id === id ? { parentId, order: Date.now(), ...(parentId ? { lectureCount: null, testCount: null } : {}) } : {}), ...(changingSubject ? { lectureIds: [], testIds: [] } : {}) } }));
+}
+/** Reopening also releases the numbered content assigned to this branch. */
+export function completionMutations(topics: Topic[], id: string, today: string, lectureIds: number[] = [], testIds: number[] = []): Mutation[] {
+  const topic = topics.find(t => t.id === id); if (!topic) return [];
+  const reopening = topicProgress(topics, id).percent === 100, leafIds = new Set(branchLeaves(topics, id).map(t => t.id));
+  const nodes = [topic, ...descendants(topics, id)];
+  return nodes.filter(t => leafIds.has(t.id) || t.id === id || reopening && (t.lectureIds?.length || t.testIds?.length)).map(t => ({ kind: 'topic', data: { ...t, completedOn: leafIds.has(t.id) ? reopening ? null : t.completedOn || today : t.completedOn, ...(reopening ? { lectureIds: [], testIds: [] } : t.id === id ? { lectureIds, testIds } : {}) } }));
+}
+export function planDates(start: string, end = start, weekdays?: number[]) {
+  if (!validDate(start) || !validDate(end) || dayNumber(end) < dayNumber(start) || dayNumber(end) - dayNumber(start) > 365) throw new Error('Choose a date range of up to one year.');
+  const result: string[] = [];
+  for (let day = start; day <= end; day = addDays(day, 1)) if (!weekdays || weekdays.includes(new Date(day + 'T12:00:00Z').getUTCDay())) result.push(day);
+  if (!result.length) throw new Error('Choose at least one day in this date range.');
+  return result;
+}
 export function studyDays(sessions: Session[]) { const days: Record<string, number> = {}; for (const session of sessions) days[session.date] = (days[session.date] || 0) + session.minutes; return days; }
 export function streaks(sessions: Session[], today: string, minimum = 1) {
   const active = Object.entries(studyDays(sessions)).filter(([day, minutes]) => day <= today && minutes >= minimum).map(([day]) => day).sort();

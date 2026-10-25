@@ -10,7 +10,8 @@ import { ArrowUpRight, BookOpen, CalendarDays, ChartNoAxesCombined, Check, Circl
 import { Badge, Button, C, Dialog, F, IconButton, Select, T, s } from './ui';
 import { StudyProvider, usePreferences, useStudy } from './store';
 import { WorkspaceContext, type Screen, type Workspace } from './workspace';
-import { dateKey, dayNumber, list, type Activity, type Exam, type Mock, type Session, type Topic } from './core/model';
+import { completionMutations, dateKey, dayNumber, list, topicProgress, type Activity, type Exam, type Mock, type Session, type Topic } from './core/model';
+import { CompletionForm, QuickRevisionForm } from './progress';
 import { ExamForm, LogForm, MockForm } from './forms';
 import Today from './screens/Today';
 import Syllabus from './screens/Syllabus';
@@ -26,6 +27,7 @@ function initialView(): Screen { if (Platform.OS !== 'web') return 'Today'; cons
 function Shell() {
   const store = useStudy(), prefs = usePreferences(), { width } = useWindowDimensions(), desktop = Platform.OS === 'web' && width >= 960;
   const updates = useAppUpdates();
+  const [completion, setCompletion] = useState<{ id: string; recordOnly?: boolean } | null>(null), [quickRevision, setQuickRevision] = useState(false);
   const [screen, setScreen] = useState<Screen>(initialView), [selectedExam, setSelectedExam] = useState(''), [more, setMore] = useState(false), [examForm, setExamForm] = useState<Exam | 'new' | null>(null), [logForm, setLogForm] = useState<{ topicId?: string; session?: Session; activity?: Activity } | null>(null), [mockForm, setMockForm] = useState<Mock | 'new' | null>(null), [now, setNow] = useState(new Date());
   const scroll = useRef<ScrollView>(null), exams = list<Exam>(store.data.records, 'exam'), examId = selectedExam === 'all' || exams.some(e => e.id === selectedExam) ? selectedExam : exams.find(e => !e.archived)?.id || exams[0]?.id || 'all', exam = exams.find(e => e.id === examId);
   const today = dateKey(now, prefs.timezone), topics = list<Topic>(store.data.records, 'topic').filter(t => examId === 'all' || t.examId === examId), sessions = list<Session>(store.data.records, 'session').filter(s => examId === 'all' || s.examId === examId), mocks = list<Mock>(store.data.records, 'mock').filter(m => examId === 'all' || m.examId === examId);
@@ -34,7 +36,7 @@ function Shell() {
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(timer); }, []);
   useEffect(() => { const listener = BackHandler.addEventListener('hardwareBackPress', () => { if (screen !== 'Today') { setScreen('Today'); return true; } return false; }); return () => listener.remove(); }, [screen]);
   useEffect(() => { if (Platform.OS !== 'web') return; const pop = () => setScreen(initialView()); const key = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openLog(); } if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) { e.preventDefault(); store.undo(); } }; window.addEventListener('popstate', pop); window.addEventListener('keydown', key); document.title = `${screen} — Studyspace`; return () => { window.removeEventListener('popstate', pop); window.removeEventListener('keydown', key); }; }, [screen, exams.length]);
-  const workspace: Workspace = { examId, exam, exams, topics, sessions, mocks, today, desktop, navigate, setExamId: setSelectedExam, openLog, openExam: initial => setExamForm(initial || 'new'), openMock: initial => exams.length ? setMockForm(initial || 'new') : setExamForm('new') };
+  const workspace: Workspace = { examId, exam, exams, topics, sessions, mocks, today, desktop, navigate, setExamId: setSelectedExam, openLog, openExam: initial => setExamForm(initial || 'new'), openMock: initial => exams.length ? setMockForm(initial || 'new') : setExamForm('new'), completeTopic: id => { if (topicProgress(topics, id).percent === 100) store.commit(completionMutations(topics, id, today), 'Branch reopened. Recorded content released.'); else setCompletion({ id }); }, editContent: id => setCompletion({ id, recordOnly: true }), quickRevision: () => setQuickRevision(true) };
   const options = [{ value: 'all', label: 'All exams' }, ...exams.map(e => ({ value: e.id, label: e.name + (e.archived ? ' · archived' : '') }))];
   const syncLabel = !store.account ? 'Saved on this device' : store.status === 'syncing' ? 'Syncing changes' : store.status === 'synced' ? 'All changes synced' : 'Saved offline';
   const ActiveScreen = { Today, Syllabus, 'Study log': StudyLog, Revision, 'Mock tests': Mocks, Insights, Plan, Settings }[screen];
@@ -66,6 +68,8 @@ function Shell() {
   {examForm && <ExamForm initial={examForm === 'new' ? undefined : examForm} onClose={() => setExamForm(null)} />}
   {logForm && <LogForm initial={logForm.session} topicId={logForm.topicId} initialActivity={logForm.activity} onClose={() => setLogForm(null)} />}
   {mockForm && <MockForm initial={mockForm === 'new' ? undefined : mockForm} onClose={() => setMockForm(null)} />}
+  {completion && <CompletionForm key={completion.id} topicId={completion.id} recordOnly={completion.recordOnly} onClose={() => setCompletion(null)} />}
+  {quickRevision && <QuickRevisionForm onClose={() => setQuickRevision(false)} />}
   </SafeAreaView></WorkspaceContext.Provider>;
 }
 export default function App() {

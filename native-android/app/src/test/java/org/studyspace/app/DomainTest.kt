@@ -6,6 +6,36 @@ import org.junit.Test
 class DomainTest {
     private val exam = Exam("exam", "GATE", "2027-02-07")
     private fun topic(id: String, parent: String? = null, date: String? = null) = Topic(id, exam.id, parent, id, completedOn = date)
+    @Test fun `subject content is derived from numbered allocations and reopening releases it`() {
+        val root = topic("root").copy(lectureCount = 10, testCount = 3)
+        val one = topic("one", "root", "2026-10-22").copy(lectureIds = listOf(1, 2), testIds = listOf(1))
+        val two = topic("two", "root").copy(lectureIds = listOf(2, 3))
+        val nodes = listOf(root, one, two); val index = TopicIndex(nodes)
+        assertEquals(3, index.content("root").lectures.size)
+        assertEquals("root", index.subjects["two"]?.id)
+        val changes = index.completionChanges("root", "2026-10-25", listOf(4), listOf(2)).associate { it.id to it.data.asModel<Topic>() }
+        val updated = nodes.map { changes[it.id] ?: it }
+        assertEquals("2026-10-22", updated.first { it.id == "one" }.completedOn)
+        assertEquals(4, TopicIndex(updated).content("root").lectures.size)
+        val reopened = TopicIndex(updated).completionChanges("root", "2026-10-26").map { it.data.asModel<Topic>() }
+        assertEquals(0, TopicIndex(reopened).content("root").lectures.size)
+        assertThrows(IllegalArgumentException::class.java) { validate("topic", jsonOf(two.copy(lectureCount = 4))) }
+        assertThrows(IllegalArgumentException::class.java) { validate("topic", jsonOf(two.copy(lectureIds = listOf(1, 1)))) }
+        assertThrows(IllegalArgumentException::class.java) { validateRelationships(listOf(WireRecord(exam.id, "exam", jsonOf(exam)), WireRecord(root.id, "topic", jsonOf(root)), WireRecord(one.id, "topic", jsonOf(one.copy(lectureIds = listOf(11)))))) }
+    }
+    @Test fun `cross subject moves release content without changing completion dates`() {
+        val nodes = listOf(topic("a").copy(lectureCount = 10), topic("b").copy(lectureCount = 3), topic("leaf", "a", "2026-10-22").copy(lectureIds = listOf(7)))
+        val moved = TopicIndex(nodes).moveChanges("leaf", "b").single().data.asModel<Topic>()
+        assertTrue(moved.lectureIds.isEmpty()); assertEquals("2026-10-22", moved.completedOn)
+    }
+    @Test fun `study plans repeat by weekday and carry details without creating studied time`() {
+        assertEquals(listOf("2026-10-26", "2026-10-28", "2026-10-30"), planDates("2026-10-26", "2026-11-01", setOf(1, 3, 5)))
+        assertThrows(IllegalArgumentException::class.java) { planDates("2026-10-26", "2028-10-26") }
+        assertThrows(IllegalArgumentException::class.java) { planDates("2026-10-26", weekdays = emptySet()) }
+        val plan = StudyTask("plan", exam.id, "Practice calculus", "plan", "2026-10-26", minutes = 45, activity = "Practice", notes = "Solve 15 questions")
+        validate("task", jsonOf(plan)); assertEquals(plan, jsonOf(plan).asModel<StudyTask>())
+        assertThrows(IllegalArgumentException::class.java) { validate("task", jsonOf(plan.copy(minutes = null))) }
+    }
     @Test fun `coverage uses leaves and closing dates roll up without rewriting old dates`() {
         val topics = listOf(topic("subject"), topic("chapter", "subject"), topic("one", "chapter", "2026-10-20"), topic("two", "chapter"))
         val index = TopicIndex(topics)

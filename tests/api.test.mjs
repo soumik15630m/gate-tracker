@@ -41,5 +41,15 @@ test('authenticated sync, isolation, idempotency, conflicts, validation, and log
   assert.ok(concurrent.every(result => result.status === 200));
   assert.equal(concurrent.reduce((sum, result) => sum + result.body.accepted.length, 0), 1);
   assert.equal(concurrent.reduce((sum, result) => sum + result.body.conflicts.length, 0), 1);
+  const subject = { ...parent, id: 'subject-progress', mutationId: 'subject-totals', data: { ...parent.data, id: 'subject-progress', lectureCount: 20, testCount: 4 } };
+  const completedTopic = { ...child, id: 'completed-topic', mutationId: 'topic-content', data: { ...child.data, id: 'completed-topic', parentId: subject.id, completedOn: '2026-10-25', lectureIds: [1, 2, 3], testIds: [1] } };
+  const plannedBlock = { id: 'plan-block', kind: 'task', baseVersion: 0, mutationId: 'detailed-plan', data: { id: 'plan-block', examId: 'exam', title: 'Calculus and questions', type: 'plan', date: '2026-10-26', done: false, topicId: completedTopic.id, minutes: 90, activity: 'Practice', notes: 'Solve questions, then revise errors.' } };
+  const progress = await request('/api/sync', { cursor: 0, changes: [subject, completedTopic, plannedBlock] }, auth.body.token);
+  assert.equal(progress.status, 200); assert.equal(progress.body.accepted.length, 3);
+  const roundTrip = await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token);
+  assert.deepEqual(roundTrip.body.records.find(r => r.id === completedTopic.id).data.lectureIds, [1, 2, 3]);
+  assert.equal(roundTrip.body.records.find(r => r.id === plannedBlock.id).data.notes, plannedBlock.data.notes);
+  const invalidProgress = { ...completedTopic, id: 'out-of-range', mutationId: 'out-of-range', data: { ...completedTopic.data, id: 'out-of-range', lectureIds: [21] } };
+  assert.equal((await request('/api/sync', { cursor: 0, changes: [invalidProgress] }, auth.body.token)).status, 400);
   await request('/api/auth/logout', {}, auth.body.token); assert.equal((await request('/api/sync', { cursor: 0, changes: [] }, auth.body.token)).status, 401);
 });

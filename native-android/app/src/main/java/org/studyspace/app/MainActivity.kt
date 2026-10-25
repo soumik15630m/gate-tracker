@@ -58,6 +58,8 @@ sealed interface Editor {
     data class TopicDetail(val id: String) : Editor
     data class MoveTopic(val id: String) : Editor
     data class Review(val id: String) : Editor
+    data object QuickRevision : Editor
+    data class Completion(val id: String, val recordOnly: Boolean = false) : Editor
     data class Delete(val kind: String, val id: String) : Editor
     data object Fresh : Editor
     data object SignIn : Editor
@@ -107,7 +109,10 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun save(changes: List<Mutation>, message: String = "Saved", close: Boolean = true) = perform(close) { repo.commit(changes, message) }
-    fun toggleTopic(id: String) = perform(false) { repo.toggleTopic(id) }
+    fun toggleTopic(id: String) {
+        if (workspace.value.index.progress[id]?.closedOn != null) perform(false) { repo.toggleTopic(id) }
+        else open(Editor.Completion(id))
+    }
     fun quickLog() = open(Editor.LogForm())
 }
 

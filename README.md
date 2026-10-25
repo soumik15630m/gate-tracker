@@ -5,10 +5,13 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 ## Included
 
 - Multiple exam workspaces, countdowns, weekly targets, milestones and archiving.
+- Detailed study plans with dated blocks, syllabus links, activities, planned duration, notes and weekday repeats. Planned effort stays separate from actual study time.
 - Unlimited logical syllabus nesting, partial checklists, automatic closing dates, search, move/reorder/edit, and indented-outline import with preview.
+- Subject-only lecture/test totals and a scrollable numbered picker when completing any branch. Selections determine chapter/subtopic counts and roll up to subject progress without duplicate credit.
 - Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision.
 - Mock results, section scores, comparable-series trends, mistake journals and optional deduplicated study entries.
 - Streaks, heatmaps, study-time trends, coverage, subject distribution, neglected subjects and approximate completion forecasts.
+- Hover/focus/tap chart details on web, tap study charts on Android, and quick revision scheduling from Today.
 - Weekly reflections, quick-capture inbox, undo, JSON backup/restore with recovery points and CSV exports.
 - Offline edits, account-based synchronization and recoverable concurrent-edit conflicts.
 - Native signed-APK update checks, checksum and certificate verification, and Android-approved installation.

@@ -50,15 +50,16 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
                 Meter(w.index.total.percent)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${w.index.total.percent}% of the syllabus covered"); Body("${w.index.total.done}/${w.index.total.total}", color = Palette.teal) }
                 Action("Log study time", Modifier.fillMaxWidth(), icon = Icons.Outlined.Add) { vm.quickLog() }
+                Action("See your plan", Modifier.fillMaxWidth(), secondary = true) { vm.select(exam.id); vm.screen.value = Screen.PLAN }
             }
         } }
         item(key = "stats-a") { StatPair({ Stat("STUDIED TODAY", duration(w.days[w.day] ?: 0), "${w.sessions.count { it.date == w.day }} study entries", it) }, { Stat("CURRENT STREAK", "${w.state.streak.current} days", "Best: ${w.state.streak.longest} days", it, Palette.gold) }) }
         item(key = "stats-b") { StatPair({ Stat("THIS WEEK", duration(w.weekMinutes), "of ${w.target.toInt()}h weekly intention", it) }, { Stat("COVERAGE", "${w.index.total.percent}%", "${w.index.total.done} of ${w.index.total.total} final items", it, Palette.teal) }) }
-        item(key = "weekly") { Card(title = "A little more, every day", subtitle = "Your study time this week") { TimeBars(weeklyValues, listOf("M", "T", "W", "T", "F", "S", "S")); Meter(if (w.target > 0) (w.weekMinutes / (w.target * 60) * 100).toInt() else 0, color = Palette.sage) } }
+        item(key = "weekly") { Card(title = "A little more, every day", subtitle = "Your study time this week") { TimeBars(weeklyValues, listOf("M", "T", "W", "T", "F", "S", "S"), dates = (0L..6L).map { addDays(weekStart(w.day), it) }, sessions = w.sessions); Meter(if (w.target > 0) (w.weekMinutes / (w.target * 60) * 100).toInt() else 0, color = Palette.sage) } }
         if (focus.isNotEmpty()) item(key = "focus-heading") { SectionTitle("Today’s focus", "${focus.size} selected topics") }
         items(focus, key = { "focus-${it.id}" }, contentType = { "focus" }) { topic -> TopicSummary(topic, w.index, vm) }
-        if (due.isNotEmpty()) item(key = "due") { Card(title = "Make room to remember", subtitle = "${due.size} topics are ready for revision") { Body(due.take(2).joinToString(" · ") { it.title }); Action("Open revision queue", secondary = true, icon = Icons.Outlined.History) { vm.screen.value = Screen.REVISION } } }
-        item(key = "heatmap") { Card(title = "Consistency, made visible", subtitle = "Every small session leaves a mark.") { ActivityGrid(w.days, w.day); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("Last 13 weeks"); Body("Less  ▪ ▪ ▪  More", color = Palette.teal) } } }
+        item(key = "due") { Card(title = "Make room to remember", subtitle = "${due.size} topics are ready for revision") { Action("Quick add revision", secondary = true, icon = Icons.Outlined.Add) { vm.open(Editor.QuickRevision) }; if (due.isNotEmpty()) Body(due.take(2).joinToString(" / ") { it.title }) else Body("Schedule a return to a subject, chapter or subtopic."); Action("Open revision queue", secondary = true, icon = Icons.Outlined.History) { vm.screen.value = Screen.REVISION } } }
+        item(key = "heatmap") { Card(title = "Consistency, made visible", subtitle = "Every small session leaves a mark.") { ActivityGrid(w.days, w.day, sessions = w.sessions); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("Last 13 weeks"); Body("Less  ▪ ▪ ▪  More", color = Palette.teal) } } }
         item(key = "inbox-title") { SectionTitle("Clear your mind", "Quick capture") }
         item(key = "inbox-add") { Action("Add an inbox note", secondary = true, icon = Icons.Outlined.Add) { vm.open(Editor.TaskForm(type = "inbox")) } }
         items(w.tasks.filter { it.type == "inbox" && !it.done }, key = { "inbox-${it.id}" }, contentType = { "task" }) { task -> TaskRow(task, vm) }
@@ -180,8 +181,8 @@ fun formatScore(score: Double) = if (score % 1.0 == 0.0) score.toInt().toString(
         else {
             item { StatPair({ Stat("STUDY TIME", duration(data.minutes), "${data.sessions} entries in this period", it) }, { Stat("ACTIVE DAYS", data.active.toString(), "${duration(data.average)} average per study day", it, Palette.teal) }) }
             item { StatPair({ Stat("CHECKLIST CLOSED", data.closed.toString(), "Closing dates within this period", it, Palette.teal) }, { Stat("LONGEST STREAK", "${w.state.streak.longest} days", "Across all your exams", it, Palette.gold) }) }
-            item { Card(title = "Your effort over time", subtitle = "Daily study minutes") { TimeBars(data.bars, data.labels) } }
-            item { Card(title = "Consistency", subtitle = "Thirteen weeks of showing up") { ActivityGrid(w.days, w.day) } }
+            item { Card(title = "Your effort over time", subtitle = "Daily study minutes") { TimeBars(data.bars, data.labels, dates = data.barDates, sessions = w.sessions, bucketDays = data.bucketWidth) } }
+            item { Card(title = "Consistency", subtitle = "Thirteen weeks of showing up") { ActivityGrid(w.days, w.day, sessions = w.sessions) } }
             item { Card(title = "Where your time goes", subtitle = "Direct and nested study time, counted once") {
                 data.subjects.take(8).forEach { (name, minutes) -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body(name, Modifier.weight(1f), Palette.text, 1); Body(duration(minutes)) }; Meter(if (data.allTime > 0) minutes * 100 / data.allTime else 0) } }
                 if (data.subjects.size > 8) Body("Your eight leading subjects by study time. Coverage for every subject is listed below.")
@@ -189,7 +190,7 @@ fun formatScore(score: Double) = if (score % 1.0 == 0.0) score.toInt().toString(
             } }
             item { Card(title = "Confidence, honestly", subtitle = "Final checklist items · independent of completion") { data.confidence.forEach { (key, count) -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body(confidenceLabels[key].orEmpty(), color = if (key == "confident") Palette.teal else Palette.muted); Body(count.toString(), color = Palette.text) } } } }
             item { SectionTitle("Subject coverage", "Closing one final item moves the whole branch forward.") }
-            items(w.index.children[null].orEmpty(), key = { "coverage-${it.id}" }, contentType = { "subject" }) { topic -> val progress = w.index.progress[topic.id] ?: Progress(); Card(title = topic.title) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${progress.done}/${progress.total} complete"); Body("${progress.percent}%", color = Palette.teal) }; Meter(progress.percent) } }
+            items(w.index.children[null].orEmpty(), key = { "coverage-${it.id}" }, contentType = { "subject" }) { topic -> val progress = w.index.progress[topic.id] ?: Progress(); Card(title = topic.title) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${progress.done}/${progress.total} complete"); Body("${progress.percent}%", color = Palette.teal) }; Meter(progress.percent); ContentMeters(w.index, topic.id) } }
             if (data.neglected.isNotEmpty()) item { Card(title = "A gentle nudge", subtitle = "Subjects with no logged study time in the last 14 days") { data.neglected.take(5).forEach { Body(it, color = Palette.gold) } } }
             if (data.forecast != null) item { Card(title = "At your recent pace") { Body("Around ${displayDate(data.forecast)} to finish the remaining checklist items.", color = Palette.text); Body("An approximate forecast from the last 28 days of closing dates. It estimates coverage, not mastery.") } }
             item { Body("Completion metrics use current closing dates. Reopening an item removes its closing date; no invented event history is used.") }
@@ -207,6 +208,8 @@ class InsightMetrics(w: Workspace, period: Int) {
     val closed = leaves.count { it.completedOn != null && it.completedOn >= start && it.completedOn <= w.day }
     private val buckets = if (period <= 7) 7 else 10
     private val width = ceil(period / buckets.toDouble()).toInt()
+    val bucketWidth = width
+    val barDates = (0 until buckets).map { addDays(start, (it * width).toLong()) }
     val bars = (0 until buckets).map { n -> val first = addDays(start, (n * width).toLong()); val last = addDays(first, (width - 1).toLong()); entries.filter { it.date in first..last }.sumOf { it.minutes } }
     val labels = (0 until buckets).map { n -> if (n == 0 || n == buckets - 1 || buckets == 7) addDays(start, (n * width).toLong()).takeLast(2) else "" }
     val allTime = w.sessions.sumOf { it.minutes }
@@ -226,6 +229,21 @@ class InsightMetrics(w: Workspace, period: Int) {
         item { PageHeading("A direction, not a deadline", "Make space for what’s next.", "Your exams, weekly intentions, and moments to reflect.") }
         item { Action("Add an exam", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } }
         items(w.state.exams.sortedBy { it.date }, key = { "exam-${it.id}" }, contentType = { "exam" }) { exam -> Card(Modifier.clickable { vm.open(Editor.ExamForm(exam)) }, title = exam.name, subtitle = displayDate(exam.date)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${dayDifference(w.day, exam.date).coerceAtLeast(0)} days", fontFamily = Serif, fontSize = 28.sp, color = Palette.sage); Body(if (exam.archived) "Archived" else "${formatScore(exam.weeklyTarget)}h / week") }; if (exam.description.orEmpty().isNotBlank()) Body(exam.description.orEmpty()); Action("Open workspace", secondary = true) { vm.select(exam.id); vm.screen.value = Screen.TODAY } } }
+        item { SectionTitle("Your detailed study plan", "Dated blocks, clear goals and time to work.") }
+        item { Action("Create detailed plan", icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.open(Editor.TaskForm(type = "plan")) } }
+        item {
+            val blocks = w.tasks.filter { it.type == "plan" }; val planned = blocks.sumOf { it.minutes ?: 0 }; val done = blocks.filter { it.done }.sumOf { it.minutes ?: 0 }
+            if (blocks.isNotEmpty()) Card { Body("${blocks.count { it.done }} / ${blocks.size} blocks complete / ${duration(done)} of ${duration(planned)} planned"); Meter(if (planned == 0) 0 else done * 100 / planned) }
+        }
+        items(w.tasks.filter { it.type == "plan" }.sortedBy { it.date }, key = { "plan-${it.id}" }, contentType = { "study-block" }) { block ->
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(block.done, { checked -> vm.save(listOf(mutation("task", block.copy(done = checked))), "Study plan updated", false) }); Body(block.title, Modifier.weight(1f).clickable { vm.open(Editor.TaskForm(block, "plan")) }, Palette.text) }
+                Body("${displayDate(block.date)} / ${duration(block.minutes ?: 0)} / ${block.activity}")
+                block.topicId?.let { Body(w.index.path(it).ifBlank { "Topic removed" }) }
+                if (!block.notes.isNullOrBlank()) Body(block.notes)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Action("Edit block", Modifier.weight(1f), secondary = true) { vm.open(Editor.TaskForm(block, "plan")) }; Action("Log actual time", Modifier.weight(1f)) { vm.open(Editor.LogForm(topic = block.topicId)) } }
+            }
+        }
         item { SectionTitle("Milestones", "Small checkpoints on a longer journey.") }
         item { Action("Add milestone", secondary = true, icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.open(Editor.TaskForm()) } }
         items(w.tasks.filter { it.type == "milestone" }.sortedBy { it.date }, key = { "milestone-${it.id}" }, contentType = { "task" }) { TaskRow(it, vm) }

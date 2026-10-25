@@ -34,6 +34,8 @@ import kotlinx.coroutines.withContext
             is Editor.TopicDetail -> TopicDetails(editor.id, w, vm)
             is Editor.MoveTopic -> MoveEditor(editor.id, w, vm)
             is Editor.Review -> ReviewEditor(editor.id, w, vm)
+            is Editor.QuickRevision -> QuickRevisionEditor(w, vm)
+            is Editor.Completion -> CompletionEditor(editor, w, vm)
             is Editor.MockForm -> MockEditor(editor, w, vm)
             is Editor.TaskForm -> TaskEditor(editor, w, vm)
             is Editor.ReflectionForm -> ReflectionEditor(editor, w, vm)
@@ -49,7 +51,7 @@ import kotlinx.coroutines.withContext
         }
     }
 }
-@Composable private fun EditorFrame(title: String, vm: NativeViewModel, saveLabel: String = "Save", onSave: (() -> Unit)? = null, onDelete: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun EditorFrame(title: String, vm: NativeViewModel, saveLabel: String = "Save", onSave: (() -> Unit)? = null, onDelete: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.workingError.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxWidth().fillMaxHeight(.91f).imePadding().navigationBarsPadding()) {
@@ -87,7 +89,7 @@ import kotlinx.coroutines.withContext
         if (original != null) ToggleLine("Archive this exam", archived, { archived = it })
     }
 }
-@Composable private fun rememberExamIndex(w: Workspace, examId: String): TopicIndex {
+@Composable internal fun rememberExamIndex(w: Workspace, examId: String): TopicIndex {
     val index by produceState(TopicIndex(emptyList()), w.state.topics, w.state.sessions, examId) { value = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == examId }, w.state.sessions.filter { it.examId == examId }) } }
     return index
 }
@@ -121,11 +123,13 @@ import kotlinx.coroutines.withContext
         }
     }
 }
-@Composable private fun ExamChoice(w: Workspace, value: String, onChange: (String) -> Unit) { Choice("Exam workspace", value, w.state.exams.map { it.id to it.name }, onChange) }
+@Composable internal fun ExamChoice(w: Workspace, value: String, onChange: (String) -> Unit) { Choice("Exam workspace", value, w.state.exams.map { it.id to it.name }, onChange) }
 @Composable private fun TopicEditor(editor: Editor.TopicForm, w: Workspace, vm: NativeViewModel) {
     val original = editor.value
     var exam by rememberSaveable { mutableStateOf(original?.examId ?: w.state.topics.firstOrNull { it.id == editor.parent }?.examId ?: w.examId.orEmpty()) }
     var title by rememberSaveable { mutableStateOf(original?.title.orEmpty()) }
+    var lectureCount by rememberSaveable { mutableStateOf(original?.lectureCount?.toString().orEmpty()) }
+    var testCount by rememberSaveable { mutableStateOf(original?.testCount?.toString().orEmpty()) }
     var confidence by rememberSaveable { mutableStateOf(original?.confidence ?: "unrated") }
     var review by rememberSaveable { mutableStateOf(original?.reviewOn.orEmpty()) }
     var focus by rememberSaveable { mutableStateOf(original?.focusOn == w.day) }
@@ -135,13 +139,17 @@ import kotlinx.coroutines.withContext
         vm.perform { vm.repo.edit("Topic saved") { current ->
             val parent = original?.parentId ?: editor.parent
             val order = original?.order ?: ((current.topics.filter { it.examId == exam && it.parentId == parent }.maxOfOrNull { it.order } ?: -1.0) + 1)
-            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(title = title.trim(), confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null)
+            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(title = title.trim(), confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null, lectureCount = if (parent == null) lectureCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count.") else null, testCount = if (parent == null) testCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count.") else null)
             listOf(mutation("topic", topic))
         } }
     }) {
         if (original == null && editor.parent == null) ExamChoice(w, exam) { exam = it }
         editor.parent?.let { index.byId[it]?.let { parent -> Body("Inside ${parent.title}", color = Palette.sage) } }
         Field("Topic title", title, { title = it }, hint = "Subject, chapter, or the smallest subtopic")
+        if ((original?.parentId ?: editor.parent) == null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Lecture count", lectureCount, { lectureCount = it }, Modifier.weight(1f), numeric = true); Field("Test count", testCount, { testCount = it }, Modifier.weight(1f), numeric = true) }
+            Body("Totals belong to the subject. Chapter and subtopic progress comes from the lectures/tests you record.")
+        }
         Choice("Confidence", confidence, confidenceLabels.toList()) { confidence = it }
         DateField("Revision date", review, { review = it }, allowEmpty = true)
         ToggleLine("Add to today’s focus", focus, { focus = it })
@@ -206,6 +214,9 @@ import kotlinx.coroutines.withContext
     EditorFrame(topic.title, vm) {
         Body(index.path(id).takeLast(700))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${progress.done}/${progress.total} final items"); Body(duration(progress.minutes), color = Palette.teal) }; Meter(progress.percent)
+        ContentMeters(index, id)
+        Action("Record lectures / tests", Modifier.fillMaxWidth(), secondary = true) { vm.open(Editor.Completion(id, recordOnly = true)) }
+        if (topic.parentId == null) Action("Edit subject totals", Modifier.fillMaxWidth(), secondary = true) { vm.open(Editor.TopicForm(topic)) }
         progress.closedOn?.let { Chip("Closed ${displayDate(it)}", selected = true) }
         Choice("Confidence", topic.confidence, confidenceLabels.toList()) { value -> vm.save(listOf(mutation("topic", topic.copy(confidence = value))), "Confidence updated", false) }
         DateField("Revision date", topic.reviewOn.orEmpty(), { value -> vm.save(listOf(mutation("topic", topic.copy(reviewOn = value.ifBlank { null }))), "Revision date updated", false) }, allowEmpty = true)
@@ -231,12 +242,11 @@ private fun moveSibling(vm: NativeViewModel, id: String, direction: Int) = vm.pe
     EditorFrame("Give this branch a new home.", vm, onSave = { vm.perform { vm.repo.edit("Branch moved") { state ->
         val current = state.topics.first { it.id == id }; val tree = TopicIndex(state.topics.filter { it.examId == current.examId })
         require(tree.canMove(id, parent)) { "A branch cannot be moved inside itself." }
-        val order = (state.topics.filter { it.examId == current.examId && it.parentId == parent }.maxOfOrNull { it.order } ?: -1.0) + 1
-        listOf(mutation("topic", current.copy(parentId = parent, order = order)))
+        tree.moveChanges(id, parent)
     } } }) {
         Body(topic.title, color = Palette.text)
         TopicSelector("New parent", index, parent, { parent = it }, excluded, "Top-level subject")
-        Body("All descendants move with this topic. Time and confidence stay attached to their original records.")
+        Body("All descendants move with this topic. Moving to another subject clears this branch’s numbered lecture/test selections. Completion dates, time and confidence stay attached.")
     }
 }
 @Composable private fun ReviewEditor(id: String, w: Workspace, vm: NativeViewModel) {
@@ -252,15 +262,44 @@ private fun moveSibling(vm: NativeViewModel, id: String, direction: Int) = vm.pe
     }
 }
 @Composable private fun TaskEditor(editor: Editor.TaskForm, w: Workspace, vm: NativeViewModel) {
-    val original = editor.value
+    val original = editor.value; val plan = editor.type == "plan"
     var exam by rememberSaveable { mutableStateOf(original?.examId ?: w.examId.orEmpty()) }
     var title by rememberSaveable { mutableStateOf(original?.title.orEmpty()) }
-    var date by rememberSaveable { mutableStateOf(original?.date.orEmpty()) }
+    var date by rememberSaveable { mutableStateOf(original?.date ?: if (plan) w.day else "") }
+    var topic by rememberSaveable { mutableStateOf(original?.topicId) }
+    var minutes by rememberSaveable { mutableStateOf((original?.minutes ?: 60).toString()) }
+    var activity by rememberSaveable { mutableStateOf(original?.activity ?: "Learning") }
+    var notes by rememberSaveable { mutableStateOf(original?.notes.orEmpty()) }
+    var repeat by rememberSaveable { mutableStateOf(false) }
+    var until by rememberSaveable { mutableStateOf(w.exam?.date ?: w.day) }
+    var days by rememberSaveable { mutableStateOf(setOf(1, 2, 3, 4, 5)) }
     val id = rememberSaveable { original?.id ?: uid("task") }
-    EditorFrame(if (editor.type == "inbox") "Make room in your mind." else "A meaningful checkpoint.", vm, onSave = { vm.save(listOf(mutation("task", StudyTask(id, exam, title.trim(), editor.type, date, original?.done ?: false, original?.topicId))), "Note saved") }, onDelete = original?.let { { vm.open(Editor.Delete("task", id)) } }) {
-        ExamChoice(w, exam) { exam = it }
-        Field(if (editor.type == "inbox") "Inbox note" else "Milestone title", title, { title = it }, multiline = true)
-        DateField("Target date", date, { date = it }, allowEmpty = true)
+    val index = rememberExamIndex(w, exam)
+    EditorFrame(if (plan) "Create a detailed plan." else if (editor.type == "inbox") "Make room in your mind." else "A meaningful checkpoint.", vm, onSave = {
+        vm.perform {
+            val dates = if (plan) planDates(date, if (repeat) until else date, if (repeat) days else null) else listOf(date)
+            val planned = if (plan) minutes.toIntOrNull() ?: error("Enter whole planned minutes.") else null
+            vm.repo.commit(dates.mapIndexed { i, day -> mutation("task", StudyTask(if (i == 0) id else uid("task"), exam, title.trim(), editor.type, day, original?.done ?: false, topic, planned, if (plan) activity else null, if (plan) notes else null)) }, "Plan saved")
+        }
+    }, onDelete = original?.let { { vm.open(Editor.Delete("task", id)) } }) {
+        ExamChoice(w, exam) { exam = it; topic = null }
+        Field(if (plan) "Study block goal" else if (editor.type == "inbox") "Inbox note" else "Milestone title", title, { title = it }, multiline = true)
+        DateField(if (plan) "Study date" else "Target date", date, { date = it }, allowEmpty = !plan)
+        if (editor.type != "inbox") TopicSelector("Linked subject or topic", index, topic, { topic = it })
+        if (plan) {
+            Field("Planned duration · minutes", minutes, { minutes = it }, numeric = true)
+            Choice("Activity", activity, activityLabels.map { it to it }) { activity = it }
+            if (original == null) ToggleLine("Repeat on selected days", repeat) { repeat = it }
+            if (repeat) {
+                DateField("Repeat until · up to one year", until, { until = it })
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEachIndexed { day, label -> Chip(label, day in days) { days = if (day in days) days - day else days + day } }
+                }
+                Body("${runCatching { planDates(date, until, days).size }.getOrDefault(0)} study blocks. Each block can be edited individually.")
+            }
+            Field("Detailed steps, resources & outcome", notes, { notes = it }, multiline = true)
+            Body("Planned time stays separate from actual study logs. Completing a block does not invent study time or close syllabus items.")
+        }
     }
 }
 @Composable private fun ReflectionEditor(editor: Editor.ReflectionForm, w: Workspace, vm: NativeViewModel) {
