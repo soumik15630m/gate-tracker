@@ -1,10 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, applyMutations, branchMinutes, canMove, dateKey, emptyState, outlineTopics, parseOutline, reconcile, streaks, topicProgress, validDate, weekStart, type Change, type Exam, type Session, type Topic } from '../src/core/model';
-import { validateBackup, validateEntity } from '../shared/validation.mjs';
+import { validateBackup, validateEntity, validateRelationships } from '../shared/validation.mjs';
 const exam: Exam = { id: 'exam', name: 'My exam', date: '2027-02-07', weeklyTarget: 10, archived: false };
 const topic = (id: string, parentId: string | null, completedOn: string | null = null): Topic => ({ id, parentId, completedOn, examId: exam.id, title: id, order: 0, confidence: 'unrated' });
 const session = (date: string, minutes = 60, topicId = 'leaf'): Session => ({ id: date, examId: exam.id, topicId, topicPath: topicId, date, minutes, activity: 'Learning', note: '' });
+
+test('shared validation handles ten thousand levels without recursion or repeated ancestor walks', () => {
+  const topics = Array.from({ length: 10000 }, (_, i) => topic(`deep-${i}`, i ? `deep-${i - 1}` : null));
+  const records = [{ kind: 'exam', data: exam }, ...topics.map(data => ({ kind: 'topic', data }))];
+  assert.doesNotThrow(() => validateRelationships(records));
+  topics[0].parentId = topics.at(-1)!.id;
+  assert.throws(() => validateRelationships(records), /circular/);
+});
 test('streak stays alive before today’s session and includes every exam', () => {
   assert.deepEqual(streaks([session('2026-10-22'), { ...session('2026-10-23'), examId: 'other' }], '2026-10-24'), { current: 2, longest: 2, activeDays: 2 });
 });

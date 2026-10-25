@@ -32,6 +32,18 @@ export function validateRelationships(records) {
   const topics = new Map(live.filter(r => r.kind === 'topic').map(r => [r.data.id, r.data]));
   for (const { kind, data } of live) {
     if (kind !== 'preferences' && kind !== 'exam' && !exams.has(data.examId)) throw new Error('A record refers to a missing exam.');
-    if (kind === 'topic') { const seen = new Set([data.id]); let parent = data.parentId; while (parent) { const node = topics.get(parent); if (!node || node.examId !== data.examId || seen.has(parent)) throw new Error('The syllabus has an invalid parent or circular branch.'); seen.add(parent); parent = node.parentId; } }
+  }
+  const checked = new Set();
+  for (const topic of topics.values()) {
+    if (checked.has(topic.id)) continue;
+    const path = new Set(); let node = topic;
+    while (node && !checked.has(node.id)) {
+      if (path.has(node.id)) throw new Error('The syllabus has an invalid parent or circular branch.');
+      path.add(node.id);
+      if (node.parentId === null) break;
+      node = topics.get(node.parentId);
+      if (!node || node.examId !== topic.examId) throw new Error('The syllabus has an invalid parent or circular branch.');
+    }
+    for (const id of path) checked.add(id);
   }
 }

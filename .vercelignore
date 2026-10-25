@@ -1,0 +1,14 @@
+native-android/
+android/
+ios/
+signing/
+data/
+build/
+tests/
+.gradle-cache/
+.expo/
+.env*
+node_modules/
+server/node_modules/
+.agents/
+skills-lock.json

@@ -98,6 +98,10 @@ The old Expo OTA workflow has been removed. Legacy Expo configuration remains on
 
 ## Sync and self-hosting
 
+The hosted website is [gate-tracker-blond-two.vercel.app](https://gate-tracker-blond-two.vercel.app). Vercel serves the desktop web application and `api/index.mjs`; `server/cloud.mjs` stores online accounts and study data in a persistent Neon PostgreSQL database. The native GitHub build embeds this address as its default sync server. Use the same account on both devices. Production database credentials live in Vercel environment variables and are never included in the web bundle or APK.
+
+The cloud API uses per-account row locks, atomic batches, bulk record writes, idempotent receipts and a database-backed authentication rate limit. Application traffic uses a pooled connection managed with Vercel's `attachDatabasePool`; schema initialization uses the direct connection. `vercel.json` configures Node 24 deployment, the static output, API routing and the Singapore function region. The local SQLite server below remains usable without any cloud service.
+
 The server persists accounts, hashed sessions, versioned records and mutation receipts in `data/studyspace.sqlite`. Passwords use scrypt with random salts. Native bearer tokens are encrypted using Android Keystore; web tokens use browser storage. Caches are isolated by server and account.
 
 Sync runs after edits and every 15 seconds while the app is active. Android also schedules network-constrained WorkManager retries; Android controls their timing. Offline changes stay queued. Server versions detect conflicting changes; mutation IDs make retries safe. If any record in a pending batch is stale, none of that batch is applied. Settings lets you keep local or server versions together.
@@ -112,6 +116,8 @@ Copy `.env.example` to `.env` for optional server configuration:
 | `ALLOWED_ORIGINS` | Local development origins | Additional comma-separated browser origins |
 | `EXPO_PUBLIC_API_URL` | Current host / development host | Web default API address |
 | `STUDYSPACE_API_URL` | Empty | Native default API address at build time |
+| `DATABASE_URL` | Unset | Cloud API pooled PostgreSQL connection, server only |
+| `DATABASE_URL_UNPOOLED` | Unset | Direct PostgreSQL connection for schema initialization, server only |
 
 Serve web and API from the same HTTPS origin with a reverse proxy, and persist `DATA_DIR`. Docker is included:
 
@@ -122,6 +128,8 @@ docker compose up --build -d
 This exposes port 3001 and uses a named SQLite volume. Use an application-consistent database backup or stop the server before copying SQLite files. JSON exports contain study records, not credentials. A serverless host needs a persistent database adapter; do not deploy this SQLite server onto an ephemeral filesystem.
 
 This personal tool has no account email delivery, password-reset emails or OS push reminders. Revision reminders live in the app.
+
+For cloud API verification, install `server/` dependencies and start `node --env-file=.env.cloud.local scripts/cloud-test-server.mjs`. This creates a randomly named temporary schema and limits the fixture's database search path to that schema. Run the API test with `TEST_CLOUD_URL=http://127.0.0.1:3138` and `TEST_CLOUD_SCHEMA` from `build/cloud-test-schema.txt`. Stop the fixture with `POST http://127.0.0.1:3138/_fixture/stop` to drop its schema. `scripts/cleanup-cloud-test.mjs` can remove that same guarded test schema after an interrupted run. The fixture never falls back to production tables.
 
 ## Progress rules
 
