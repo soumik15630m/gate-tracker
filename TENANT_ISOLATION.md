@@ -15,7 +15,7 @@ Reviewed on 25 October 2026. A tenant is one registered user account; sharing a 
 
 `npm run test:api` includes `tests/tenant-isolation.test.mjs`. It exercises the local SQLite handler; the same test can target `createCloudHandler` through the existing isolated PostgreSQL fixture.
 
-Result on the review date: all eight API test cases passed against both SQLite and the isolated PostgreSQL handler, including six tenant-specific subtests. TypeScript checking and all sixteen domain tests also passed. No cross-account access was found in these tested paths. This is not a claim that every possible attack has been excluded.
+Result on the review date: all fifteen API test cases passed against SQLite and the isolated PostgreSQL handler, including six tenant-specific subtests and six shared-timer subtests. TypeScript checking, all twenty-four web domain/search/timer tests, sixteen native unit tests and eight Android instrumented tests also passed. No cross-account access was found in these tested paths. This is not a claim that every possible attack has been excluded.
 
 The suite creates disposable accounts and checks:
 
@@ -34,3 +34,5 @@ Cloud tests use a randomly named `studyspace_test_*` schema with a search path t
 This is application-enforced isolation in shared tables, not database-enforced row-level security. Database administrators and holders of the server's database credentials can access all accounts. A future API query must retain the account filter; the regression suite helps catch omissions but is not a formal proof.
 
 The bearer token grants access to its account. Browser storage on a shared OS/browser profile is not a security boundary against someone who can inspect that profile: account caches are retained after logout for offline continuity. Android account caches likewise remain on the device, while its login token is encrypted with Android Keystore. This review does not claim protection against compromised devices, stolen tokens, or database administrators.
+
+Shared stopwatches use one `account_timers` row per authenticated user. The API ignores client-supplied identity fields, reads/writes only the session owner, serializes mutations with that user's existing write lock, and rejects stale timer versions. Logging a timer and clearing it occur in the same transaction; retries do not create another entry. Shared timer caches remain separated by server and user on both clients. `tests/shared-timer.test.mjs` covers cross-device controls, colliding actions, unauthorized access and account isolation on SQLite and the isolated PostgreSQL fixture.

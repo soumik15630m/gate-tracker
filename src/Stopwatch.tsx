@@ -1,3 +1,4 @@
+import { SharedStopwatch } from './SharedStopwatch';
 import React, { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,6 +12,10 @@ import { elapsedMs, pauseTimer, readTimer, resumeTimer, timerClock, timerMinutes
 
 // Ticks stay inside this component, so large syllabus trees do not rerender every second.
 export function Stopwatch({ storageKey }: { storageKey: string }) {
+  const { account } = useStudy();
+  return account ? <SharedStopwatch account={account} storageKey={storageKey} /> : <LocalStopwatch storageKey={storageKey} />;
+}
+function LocalStopwatch({ storageKey }: { storageKey: string }) {
   const store = useStudy(), workspace = useWorkspace();
   const [timer, setTimer] = useState<StudyTimer | null>(null), [ready, setReady] = useState(false), [now, setNow] = useState(Date.now()), [logging, setLogging] = useState(false), [discard, setDiscard] = useState(false);
   const writes = useRef(Promise.resolve());

@@ -192,8 +192,16 @@ import kotlinx.coroutines.withContext
             val h = hours.toIntOrNull() ?: error("Enter whole hours."); val m = minutes.toIntOrNull() ?: error("Enter whole minutes.")
             require(h >= 0 && m in 0..59 && h * 60 + m in 1..1440) { "Log between 1 minute and 24 hours, with minutes from 0 to 59." }
             val path = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == exam }).path(topic).takeLast(10000) }
-            vm.repo.commit(listOf(mutation("session", StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId))), "Study time logged", expectedScope = editor.timerScope)
-            editor.timer?.let { vm.stopwatch.consume(it.id, editor.timerScope.orEmpty()) }
+            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId)
+            if (editor.timerVersion != null) {
+                vm.repo.sync()
+                vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry)
+                vm.repo.sync()
+                vm.repo.messages.emit("Study time recorded across your devices")
+            } else {
+                vm.repo.commit(listOf(mutation("session", entry)), "Study time logged", expectedScope = editor.timerScope)
+                editor.timer?.let { vm.stopwatch.consume(it.id, editor.timerScope.orEmpty()) }
+            }
         }
     }, onDelete = original?.let { { vm.open(Editor.Delete("session", id)) } }) {
         if (editor.timer != null) Body("Your stopwatch is paused. Time is rounded to whole minutes; adjust it if needed. Closing keeps your unsaved timer. Create an exam workspace first if you do not have one yet.")

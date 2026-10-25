@@ -12,7 +12,7 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Add multiple subjects or sibling child topics as editable rows in one form with a single Save all action. The name field focuses automatically; Enter saves the list, while multiline inputs retain new lines.
 - Subject-only lecture/test totals and a scrollable numbered picker when completing any branch. Selections determine chapter/subtopic counts and roll up to subject progress without duplicate credit.
 - Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision.
-- One-tap stopwatch on every screen, with pause/resume and Finish & log. Choose the exam, subject, any topic depth, activity and notes afterwards. Unsaved timers survive reloads/restarts on that device and are isolated by account/server. Closing the log form retains the paused timer; only saving or confirmed discard clears it. Logs use editable whole-minute rounding and a stable entry ID to avoid duplicate entries on retry.
+- One-tap stopwatch on every screen, with pause/resume and Finish & log. Signed-in accounts share one timer across web and Android: a compact header identifies where it started, either device controls it, and foreground clients refresh about every two seconds. Server timestamps keep elapsed time consistent; background clients catch up on reopening. Finishing pauses without logging, and saving atomically creates one study entry and clears the timer across devices. Closing the form retains the paused timer. Shared controls need a connection; offline displays show the last known state. Signed-out timers stay on their device. Earlier unsaved local timers are imported once when possible and preserved in a recovery copy.
 - Mock results, section scores, comparable-series trends, mistake journals and optional deduplicated study entries.
 - Streaks, heatmaps, study-time trends, coverage, subject distribution, neglected subjects and approximate completion forecasts.
 - Hover/focus/tap chart details on web, tap study charts on Android, and quick revision scheduling from Today.
@@ -21,6 +21,8 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Native signed-APK update checks, checksum and certificate verification, and Android-approved installation.
 
 The initial local workspace contains **labelled sample data**. Use **Settings → Start fresh** for your own data. A newly created sync account starts empty. Export/import transfers local work into that account.
+
+Shared timers use an additive `account_timers` table, separate from preparation records. Existing users, syllabi, study entries and backups are retained.
 
 Importance is an optional JSON field: old records and version 1 backups remain valid and display N/A until rated. Adding ratings does not require a database reset, a Room schema change, or rewriting existing records. Install Android updates over the existing app to retain its private storage; uninstalling or clearing app data removes local storage. Settings provides a JSON export for keeping your own backup copy.
 

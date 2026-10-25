@@ -50,7 +50,7 @@ enum class Screen(val title: String) { TODAY("Today"), SYLLABUS("Syllabus"), LOG
 sealed interface Editor {
     data class ExamForm(val value: Exam? = null) : Editor
     data class TopicForm(val value: Topic? = null, val parent: String? = null) : Editor
-    data class LogForm(val value: StudySession? = null, val topic: String? = null, val timer: StudyTimer? = null, val timerScope: String? = null) : Editor
+    data class LogForm(val value: StudySession? = null, val topic: String? = null, val timer: StudyTimer? = null, val timerScope: String? = null, val timerVersion: Long? = null) : Editor
     data class MockForm(val value: MockTest? = null) : Editor
     data class TaskForm(val value: StudyTask? = null, val type: String = "milestone") : Editor
     data class ReflectionForm(val value: Reflection? = null) : Editor
@@ -92,6 +92,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     val busy = MutableStateFlow(false)
     val workingError = MutableStateFlow("")
     val stopwatch = NativeStopwatch(application, repo.workspace, viewModelScope)
+    val sharedStopwatch = SharedNativeStopwatch(application, repo)
     val updater = NativeUpdater(application)
     var mockDraft: MockDraft? = null
     val workspace = combine(repo.snapshot, selected) { state, selection -> state to selection }

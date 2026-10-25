@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { unpackTimer, timerReply, transitionTimer, timerLogWrites } from './timer.mjs';
 import { attachDatabasePool } from '@vercel/functions';
 import { randomBytes, scrypt as derive, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -21,6 +22,7 @@ const schema = `
   CREATE TABLE IF NOT EXISTS records (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, deleted INTEGER NOT NULL, version INTEGER NOT NULL, changed_at TEXT NOT NULL, PRIMARY KEY(user_id,id));
   CREATE TABLE IF NOT EXISTS receipts (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mutation_id TEXT NOT NULL, record_id TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(user_id,mutation_id));
   CREATE TABLE IF NOT EXISTS auth_buckets (id TEXT PRIMARY KEY, attempts INTEGER NOT NULL, reset_at BIGINT NOT NULL);
+  CREATE TABLE IF NOT EXISTS account_timers (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, state TEXT NOT NULL, version INTEGER NOT NULL, last_saved_id TEXT);
   CREATE INDEX IF NOT EXISTS records_cursor ON records(user_id,version);
   CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
   CREATE INDEX IF NOT EXISTS auth_buckets_expiry ON auth_buckets(reset_at);`;
@@ -119,6 +121,31 @@ export function createCloudHandler(options = {}) {
       const session = token && (await db.query('SELECT user_id FROM sessions WHERE token=$1 AND expires>$2', [digest(token), Date.now()])).rows[0];
       if (!session) throw fail(401, 'Sign in again to continue syncing. Your local data is safe.');
       if (path === '/api/auth/logout') { await db.query('DELETE FROM sessions WHERE token=$1', [digest(token)]); return json(res, 200, { ok: true }); }
+      if (path === '/api/timer') {
+        const input = await body(req);
+        if (input.action === 'read') return json(res, 200, timerReply(unpackTimer((await db.query('SELECT * FROM account_timers WHERE user_id=$1', [session.user_id])).rows[0])));
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          const user = (await client.query('SELECT revision FROM users WHERE id=$1 FOR UPDATE', [session.user_id])).rows[0];
+          if (!user) throw fail(401, 'Sign in again to continue syncing.');
+          const previous = unpackTimer((await client.query('SELECT * FROM account_timers WHERE user_id=$1', [session.user_id])).rows[0]);
+          let next;
+          try { next = transitionTimer(input, previous); } catch (error) { if (error.status === 409) { await client.query('ROLLBACK'); return json(res, 409, { error: error.message, state: timerReply(previous) }); } throw error; }
+          if (next !== previous) {
+            if (input.action === 'import' && (await client.query('SELECT 1 FROM records WHERE user_id=$1 AND id=$2', [session.user_id, next.timer.id])).rowCount) throw fail(409, 'The previous stopwatch already has a saved entry.');
+            if (input.action === 'log') {
+              const writes = timerLogWrites(input, (await client.query('SELECT * FROM records WHERE user_id=$1', [session.user_id])).rows.map(unpack));
+              let revision = user.revision;
+              for (const record of writes) await client.query('INSERT INTO records VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at', [session.user_id, record.id, record.kind, JSON.stringify(record.data), 0, ++revision, new Date().toISOString()]);
+              await client.query('UPDATE users SET revision=$1 WHERE id=$2', [revision, session.user_id]);
+            }
+            await client.query('INSERT INTO account_timers VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET state=excluded.state,version=excluded.version,last_saved_id=excluded.last_saved_id', [session.user_id, JSON.stringify(next.timer), next.version, next.lastSavedId]);
+          }
+          await client.query('COMMIT'); return json(res, 200, timerReply(next));
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+        finally { client.release(); }
+      }
       if (path !== '/api/sync') throw fail(404, 'API route not found.');
       const input = await body(req);
       if (!Array.isArray(input.changes) || input.changes.length > 20000 || !Number.isSafeInteger(input.cursor) || input.cursor < 0) throw fail(400, 'Invalid sync request.');

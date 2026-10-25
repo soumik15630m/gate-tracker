@@ -1,3 +1,4 @@
+import { unpackTimer, timerReply, transitionTimer, timerLogWrites } from './timer.mjs';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, scrypt as derive, timingSafeEqual, createHash } from 'node:crypto';
@@ -19,6 +20,7 @@ export function createStudyServer(options = {}) {
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS records (user_id TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, deleted INTEGER NOT NULL, version INTEGER NOT NULL, changed_at TEXT NOT NULL, PRIMARY KEY(user_id,id));
     CREATE TABLE IF NOT EXISTS receipts (user_id TEXT NOT NULL, mutation_id TEXT NOT NULL, record_id TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(user_id,mutation_id));
+    CREATE TABLE IF NOT EXISTS account_timers (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, state TEXT NOT NULL, version INTEGER NOT NULL, last_saved_id TEXT);
     CREATE INDEX IF NOT EXISTS records_cursor ON records(user_id,version);`);
   const rate = new Map(), staticRoot = resolve(options.staticRoot || 'dist');
   const allowed = new Set((process.env.ALLOWED_ORIGINS || 'http://localhost:8081,http://localhost:3001,http://127.0.0.1:8081,http://127.0.0.1:3001').split(',').map(s => s.trim()));
@@ -60,6 +62,29 @@ export function createStudyServer(options = {}) {
         const session = token && db.prepare('SELECT user_id FROM sessions WHERE token=? AND expires>?').get(digest(token), Date.now());
         if (!session) throw httpError(401, 'Sign in again to continue syncing. Your local data is safe.');
         if (path === '/api/auth/logout' && req.method === 'POST') { db.prepare('DELETE FROM sessions WHERE token=?').run(digest(token)); return json(res, 200, { ok: true }); }
+        if (path === '/api/timer' && req.method === 'POST') {
+          const input = await body(req);
+          const current = () => unpackTimer(db.prepare('SELECT * FROM account_timers WHERE user_id=?').get(session.user_id));
+          if (input?.action === 'read') return json(res, 200, timerReply(current()));
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const previous = current();
+            let next;
+            try { next = transitionTimer(input, previous); } catch (error) { if (error.status === 409) { db.exec('ROLLBACK'); return json(res, 409, { error: error.message, state: timerReply(previous) }); } throw error; }
+            if (next !== previous) {
+              if (input.action === 'import' && db.prepare('SELECT 1 FROM records WHERE user_id=? AND id=?').get(session.user_id, next.timer.id)) throw httpError(409, 'The previous stopwatch already has a saved entry.');
+              if (input.action === 'log') {
+                const records = db.prepare('SELECT * FROM records WHERE user_id=?').all(session.user_id).map(unpack);
+                const writes = timerLogWrites(input, records);
+                let revision = db.prepare('SELECT revision FROM users WHERE id=?').get(session.user_id).revision;
+                for (const record of writes) db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data, deleted=excluded.deleted, version=excluded.version, changed_at=excluded.changed_at').run(session.user_id, record.id, record.kind, JSON.stringify(record.data), 0, ++revision, new Date().toISOString());
+                db.prepare('UPDATE users SET revision=? WHERE id=?').run(revision, session.user_id);
+              }
+              db.prepare('INSERT INTO account_timers VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET state=excluded.state,version=excluded.version,last_saved_id=excluded.last_saved_id').run(session.user_id, JSON.stringify(next.timer), next.version, next.lastSavedId);
+            }
+            db.exec('COMMIT'); return json(res, 200, timerReply(next));
+          } catch (error) { db.exec('ROLLBACK'); throw error; }
+        }
         if (path === '/api/sync' && req.method === 'POST') {
           const input = await body(req), accepted = [], conflicts = [];
           if (!Array.isArray(input.changes) || input.changes.length > 20000 || !Number.isSafeInteger(input.cursor) || input.cursor < 0) throw httpError(400, 'Invalid sync request.');

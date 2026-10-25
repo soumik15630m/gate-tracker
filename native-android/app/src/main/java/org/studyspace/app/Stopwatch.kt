@@ -41,6 +41,11 @@ class NativeStopwatch(context: Context, workspace: StateFlow<String>, coroutineS
 
 // Only this small composable ticks; the surrounding syllabus list stays idle.
 @Composable fun StudyStopwatch(vm: NativeViewModel) {
+    val account by vm.repo.account.collectAsStateWithLifecycle()
+    if (account != null) { key(account!!.scope()) { SharedStudyStopwatch(vm, account!!) }; return }
+    LocalStudyStopwatch(vm)
+}
+@Composable private fun LocalStudyStopwatch(vm: NativeViewModel) {
     val timer by vm.stopwatch.timer.collectAsStateWithLifecycle()
     val scope by vm.repo.workspace.collectAsStateWithLifecycle()
     val saved by vm.repo.snapshot.collectAsStateWithLifecycle()

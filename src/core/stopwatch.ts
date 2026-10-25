@@ -1,4 +1,4 @@
-export interface StudyTimer { id: string; accumulatedMs: number; startedAt: number | null }
+export interface StudyTimer { id: string; accumulatedMs: number; startedAt: number | null; origin?: string; updatedBy?: string; finished?: boolean }
 export function elapsedMs(timer: StudyTimer, now = Date.now()): number {
   return timer.accumulatedMs + (timer.startedAt === null ? 0 : Math.max(0, now - timer.startedAt));
 }

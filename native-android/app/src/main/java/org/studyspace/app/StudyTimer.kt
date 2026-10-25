@@ -3,7 +3,7 @@ package org.studyspace.app
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToLong
 
-@Serializable data class StudyTimer(val id: String, val accumulatedMs: Long = 0, val startedAt: Long? = null) {
+@Serializable data class StudyTimer(val id: String, val accumulatedMs: Long = 0, val startedAt: Long? = null, val origin: String? = null, val updatedBy: String? = null, val finished: Boolean = false) {
     fun elapsed(now: Long = System.currentTimeMillis()) = accumulatedMs + (startedAt?.let { (now - it).coerceAtLeast(0) } ?: 0)
     fun pause(now: Long = System.currentTimeMillis()) = copy(accumulatedMs = elapsed(now), startedAt = null)
     fun resume(now: Long = System.currentTimeMillis()) = if (startedAt == null) copy(startedAt = now) else this

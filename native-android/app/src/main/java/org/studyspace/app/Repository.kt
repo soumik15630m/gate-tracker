@@ -260,6 +260,12 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
         WorkManager.getInstance(context).enqueueUniqueWork("studyspace-edit-sync", ExistingWorkPolicy.KEEP, OneTimeWorkRequestBuilder<SyncWorker>()
             .setInitialDelay(1, TimeUnit.SECONDS).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
     }
+    suspend fun timerRequest(auth: Account, input: JsonObject): SharedTimerState = withContext(Dispatchers.IO) {
+        require(_account.value == auth) { "The account changed. Reopen your timer." }
+        val response = request(auth.server + "/api/timer", input, auth.token)
+        require(_account.value == auth) { "The account changed. Reopen your timer." }
+        response.asModel<SharedTimerState>()
+    }
     private fun request(address: String, body: JsonObject, token: String? = null): JsonObject {
         val connection = URL(address).openConnection() as HttpURLConnection
         try {
@@ -272,6 +278,7 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
             val stream = if (success) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val value = runCatching { codec.parseToJsonElement(text).jsonObject }.getOrNull()
+            if (!success && connection.responseCode == 409 && value?.get("state") is JsonObject) throw SharedTimerChanged(value["error"]?.jsonPrimitive?.content ?: "The timer changed on another device.", value.getValue("state").jsonObject.asModel<SharedTimerState>())
             if (!success) throw IllegalStateException(value?.get("error")?.jsonPrimitive?.content ?: "The server could not complete this request (${connection.responseCode}).")
             return value ?: error("The sync server returned an unreadable response.")
         } finally { connection.disconnect() }
