@@ -1,179 +1,148 @@
 # Studyspace
 
-A personal exam-preparation workspace for **native Android and desktop web**, with offline storage and account-based sync. OLED black, muted sage controls, teal analytics, and gold streaks. Built with Expo / React Native, TypeScript, and a small Node.js + SQLite sync server. Apache-2.0 licensed, preserving this repository’s original license.
+A personal exam-preparation workspace for **native Android and desktop web**. Android is Kotlin + Jetpack Compose with Room storage; desktop web uses React Native Web / Expo and TypeScript. Both clients use the same Node.js + SQLite sync API and JSON backup format. OLED black, muted sage controls, teal analytics and gold streaks. Apache-2.0 licensed.
 
 ## Included
 
-- Multiple exam workspaces, countdowns, weekly targets, milestones, and exam archiving.
-- Syllabus trees with unlimited logical nesting, three-state checklists, completion dates, search, move/reorder/rename, and outline import with a preview.
-- Manual study entries assigned to any level of a syllabus. Parent totals never double-count time.
-- Independent topic confidence, daily focus, revision scheduling, and an error journal.
-- Mock-test results, section scores, comparable-series score charts, and optionally linked time entries.
-- Activity heatmaps, time trends, subject distribution, coverage, completion momentum, streaks, neglected subjects, and personal milestones.
-- Weekly reflections with automatic study summaries and a quick-capture inbox.
-- Full JSON backup/restore with a recovery point, plus study-log and mock CSV exports.
-- Offline edit queues, automatic foreground sync, retry-safe server writes, and recoverable concurrent-edit conflicts.
-- GitHub Actions for automatic compatible Android OTA delivery, CI checks, and tagged native APK builds.
-- Keyboard shortcuts: Ctrl/Cmd + K to log study time; Ctrl/Cmd + Z to undo the last workspace change outside text fields.
+- Multiple exam workspaces, countdowns, weekly targets, milestones and archiving.
+- Unlimited logical syllabus nesting, partial checklists, automatic closing dates, search, move/reorder/edit, and indented-outline import with preview.
+- Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision.
+- Mock results, section scores, comparable-series trends, mistake journals and optional deduplicated study entries.
+- Streaks, heatmaps, study-time trends, coverage, subject distribution, neglected subjects and approximate completion forecasts.
+- Weekly reflections, quick-capture inbox, undo, JSON backup/restore with recovery points and CSV exports.
+- Offline edits, account-based synchronization and recoverable concurrent-edit conflicts.
+- Native signed-APK update checks, checksum and certificate verification, and Android-approved installation.
 
-The initial local workspace contains **clearly labelled sample data**. Use **Settings → Start fresh** for your own data. Creating a sync account starts an empty workspace. Export/import can transfer your existing local data into that account.
+The initial local workspace contains **labelled sample data**. Use **Settings → Start fresh** for your own data. A newly created sync account starts empty. Export/import transfers local work into that account.
 
-## Run locally
+## Desktop web and sync server
 
-Requires Node.js 24 or newer.
+Requires Node.js 24+:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-The web development app is at `http://localhost:8081`; the API is at `http://localhost:3001`. Alternatively, serve the production build and API together:
+Development web: `http://localhost:8081`; API: `http://localhost:3001`. To serve the production web and API together:
 
 ```sh
 npm run build
 npm start
 ```
 
-Open `http://localhost:3001`. The production web build also caches its application shell for offline reloads after the first successful load. API responses are never put in the service-worker cache.
+Open `http://localhost:3001`. After a successful first load, the web application shell is cached for offline reloads. API responses are never cached by its service worker. Ctrl/Cmd + K opens study logging; Ctrl/Cmd + Z undoes a workspace change outside text fields.
 
-## Android
+## Native Android
 
-### Development
-
-```sh
-npm run android
-```
-
-This starts Expo for an Android emulator or Expo Go on a phone. Use the same sync server and account on the phone and web. If using a physical phone, keep both devices on the same network and use the computer’s LAN address, for example `http://192.168.1.20:3001`, in **Settings → Sync server address**. `localhost` on the phone refers to the phone. Your firewall must permit the API port on the network you intend to use.
-
-### Personal-use APK
-
-With Android Studio’s SDK, JDK 17+ (the bundled JDK works), and the required SDK licenses/tooling already configured:
+Open `native-android/` in Android Studio, or use JDK 17+, Android SDK platform 36 and build tools 36.0.0:
 
 ```sh
-npm run apk
+npm run android       # debug APK
+npm run test:android  # native domain tests
+npm run apk           # release tests, lint and optimized signed APK
 ```
 
-On Windows the helper detects Android Studio’s usual JDK and SDK locations; elsewhere set `JAVA_HOME` and `ANDROID_HOME`. The output is `build/studyspace-preview.apk`, targeting ARM64 phones. This standalone preview includes the native application and its JavaScript bundle, uses the generated development signing key, and permits HTTP for local-network sync. The Android-generated directory is intentionally ignored; Expo regenerates it from the tracked config and plugin.
+The release output is `build/studyspace-android.apk`. The debug output is `build/studyspace-android-debug.apk`. Android contains **no JavaScript runtime or WebView**. Release builds use R8 and resource shrinking. Minimum Android version: 7.0 / API 24; target: Android 16 / API 36.
 
-The local helper limits Gradle to two workers and reserves extra compiler memory for Expo Updates. Set `STUDYSPACE_GRADLE_JVMARGS` to override its JVM memory options for your machine. Every local APK build regenerates Expo’s update resources and verifies its runtime against a fresh fingerprint, preventing a cached runtime from blocking compatible OTA delivery.
+The helper detects Android Studio's usual SDK/JDK locations on Windows. Elsewhere set `JAVA_HOME` and `ANDROID_HOME`. Open Android Studio's SDK manager to install the required components and accept licenses. The Gradle wrapper is tracked; Node dependencies are unnecessary when building directly with `native-android/gradlew`.
 
-For a production release, set `EXPO_PUBLIC_API_URL` to your HTTPS server and configure your own release signing. The production EAS profile leaves cleartext HTTP disabled and builds a signed personal-distribution APK:
+Local builds use the ignored `signing/development.keystore`. When available, the helper copies the former local APK's key to preserve upgrade compatibility; fresh checkouts generate a development key. Keep your signing key backed up privately. A different certificate requires a separate installation and cannot update the existing app. Supply your own release key using:
+
+```text
+NATIVE_KEYSTORE_PATH
+NATIVE_KEYSTORE_PASSWORD
+NATIVE_KEY_ALIAS
+NATIVE_KEY_PASSWORD
+```
+
+Set `STUDYSPACE_API_URL` before compiling to embed a default HTTPS sync-server address. It remains editable in Settings. Use the same server and account on Android and web. For local testing, private LAN HTTP addresses such as `http://192.168.1.20:3001` are supported. Public servers require HTTPS. `localhost` on a physical phone means the phone itself; emulator access to the host is `http://10.0.2.2:3001`.
+
+### Migration from the former Expo Android app
+
+The package ID remains `org.studyspace.app`. A correctly signed upgrade preserves app data and imports recognizable previous AsyncStorage workspace caches into Room without modifying the old database. Account caches remain isolated by server and user. Sign in again to reconnect synchronization. Export a JSON backup before upgrading, especially if your old APK used a different signing certificate. Uninstalling an app removes its private storage.
+
+### Performance design and device tests
+
+Syllabus trees are indexed iteratively on a background dispatcher, including coverage and time rollups. Lists use stable keys and lazy rows rather than recursive composables. Search and outline parsing run off the UI thread. Room uses WAL transactions and coalesces offline changes; network, file and backup work use IO dispatchers. Charts draw directly on Canvas.
+
+Run instrumented tests on a **dedicated test emulator**; their fixture replaces its local workspace:
 
 ```sh
-npx eas-cli build --platform android --profile production
+cd native-android
+./gradlew :app:connectedDebugAndroidTest
 ```
 
-EAS requires your own Expo account and signing configuration. Use the `store` profile for a Play Store app bundle, or `preview` for an HTTP-enabled LAN-testing APK. A local native bundle check is available with `npm run export:android`; it does not create an APK or replace testing on a physical phone.
+The tests exercise native forms, confidence, completion, logging, backup/restore, a 5,000-topic list and screen navigation. JVM tests include a 10,000-level tree. Emulator results do not establish frame performance on a physical Poco X6; evaluate the optimized release APK on that device.
 
-## Automatic Android OTA from GitHub
+For the native API round-trip and conflict test, start `node scripts/native-test-server.mjs` in a separate terminal, then append `'-Pandroid.testInstrumentationRunnerArguments.syncServer=http://10.0.2.2:3137'` to the Gradle test command. The fixture uses an in-memory database and does not touch your preparation database.
 
-Repository: [soumik15630m/gate-tracker](https://github.com/soumik15630m/gate-tracker).
+## Automatic Android updates from GitHub
 
-The native app includes `expo-updates`. After the one-time setup below, pushes to `main` publish Android OTA updates automatically to both `preview` and `production`, after TypeScript and the domain/API tests pass. The local preview APK receives the `preview` channel, with its matching native configuration. The app checks on launch and when returning to the foreground, downloads compatible improvements, and loads them on the next launch. **Settings → App updates** also offers a manual check and a save-before-restart action. Updates do not force a restart during study entry.
+The **Native Android** workflow runs on native-code pushes to `main`, `v*` tags and manual dispatch. It builds with Gradle on the GitHub runner, runs unit tests and lint, and publishes the signed APK plus `android-release.json` to the rolling prerelease **android-latest**. No Expo account or EAS build service is used for native Android.
 
-The native runtime uses Expo’s **fingerprint** policy. A JS/UI/asset-only change can update an installed compatible binary. A native dependency, native configuration, or plugin change produces a different runtime and requires a new APK. An existing binary never intentionally loads an update for a different runtime. Keep the built-in Expo error-recovery behaviour enabled.
+Configure four GitHub Actions secrets using your own private signing key:
 
-### One-time setup
+| Secret | Value |
+| --- | --- |
+| `NATIVE_KEYSTORE_BASE64` | Base64-encoded keystore bytes |
+| `NATIVE_KEYSTORE_PASSWORD` | Keystore password |
+| `NATIVE_KEY_ALIAS` | Signing alias |
+| `NATIVE_KEY_PASSWORD` | Key password |
 
-1. Create or choose a project in your Expo account. Copy its public project UUID, owner, and slug.
-2. Link it locally and commit the resulting public configuration:
+An optional repository variable `EXPO_PUBLIC_API_URL` supplies the default sync address to both web and native builds. The legacy variable name is retained for compatibility. Publishing fails explicitly if the signing key is missing. Pull-request checks receive no publishing secrets.
 
-   ```sh
-   npm run ota:configure -- <project-uuid> <expo-owner> <project-slug>
-   ```
+The app checks GitHub at most daily on launch and offers a manual check in **Settings → App updates**. Downloaded APKs must match the release SHA-256, package ID, expected version and installed signing certificate. Installation requires Android's approval. Native application code cannot be silently replaced through JavaScript OTA. Study-data synchronization is independent of application updates.
 
-3. In the GitHub repository’s **Settings → Secrets and variables → Actions**, add **`EXPO_TOKEN`** as a secret. Obtain it from your own Expo account’s access-token settings. Never paste it into a source file, issue, or chat.
-4. Optionally set repository variables `EXPO_PROJECT_ID` and `EXPO_OWNER` instead of committing the IDs. The public config is preferable because it keeps local and cloud builds aligned.
-5. Set `EXPO_PUBLIC_API_URL` to the same reachable HTTPS sync server in your **EAS production environment** and GitHub repository variables. For preview, use the matching EAS preview environment. `eas update --environment` uses the selected EAS environment, so native builds and updates must share those values.
-6. Run your first EAS Android build interactively to initialise signing credentials, then install that APK:
+The old Expo OTA workflow has been removed. Legacy Expo configuration remains only for the web build and historical source compatibility. To roll back application behavior, publish a corrected build with a higher version code; Android normally rejects version downgrades.
 
-   ```sh
-   npx eas-cli build --platform android --profile production
-   ```
+## Sync and self-hosting
 
-7. Push a JS change to `main` to publish to both channels, or run **Actions → Android OTA → Run workflow** to publish only the selected channel. Manual runs default to `production` and can target `preview` instead. The workflow publishes only Android.
+The server persists accounts, hashed sessions, versioned records and mutation receipts in `data/studyspace.sqlite`. Passwords use scrypt with random salts. Native bearer tokens are encrypted using Android Keystore; web tokens use browser storage. Caches are isolated by server and account.
 
-Until a valid Expo project is configured, local APKs work with embedded code and show an honest “not linked” update state. Adding a project ID later requires installing **one newly configured APK** before that phone can receive OTA. Study/account sync and application-code OTA are separate systems.
+Sync runs after edits and every 15 seconds while the app is active. Android also schedules network-constrained WorkManager retries; Android controls their timing. Offline changes stay queued. Server versions detect conflicting changes; mutation IDs make retries safe. If any record in a pending batch is stale, none of that batch is applied. Settings lets you keep local or server versions together.
 
-### Workflows
-
-| Workflow | Trigger | Result |
-| --- | --- | --- |
-| `Checks` | Pull requests, pushes to main, manual | Types, domain/API tests, production web and Android-bundle builds |
-| `Android OTA` | App-code pushes to main, manual | Validated update published through EAS to the selected channel |
-| `Android APK` | A `v*` tag, manual | Signed EAS APK build using the selected channel and build profile |
-
-The publishing workflows require `EXPO_TOKEN` and a linked project. Before setup, an automatic push skips publishing and writes setup instructions to the workflow summary. A manual publishing/build request fails explicitly if configuration is missing. Fork pull requests run checks without receiving publishing secrets. The APK workflow uses the signing credentials initialised in your Expo account and returns an EAS download link in its logs. Expo services use your own account and its service limits.
-
-For rollback, use the EAS dashboard or republish a previously known-good update to the same channel and runtime. [Expo’s OTA documentation](https://docs.expo.dev/eas-update/getting-started/) describes delivery and runtime matching; [the GitHub integration](https://docs.expo.dev/eas-update/github-actions/) covers access-token setup.
-
-## Sync & self-hosting
-
-No external database or paid service is required. The server stores accounts, hashed sessions, versioned study records, and mutation receipts in `data/studyspace.sqlite`. Passwords are hashed with scrypt and a per-user random salt. Android tokens use SecureStore; web tokens use browser storage. Accounts and caches are isolated by server and user.
-
-In **Settings**, enter your server, create an account, and use that same account on both devices. Sync runs shortly after edits, every 15 seconds while the app is open, and when the native app returns to the foreground. Native background execution is not promised. Offline changes remain queued until the app can reach the server.
-
-Edits use server versions rather than device clocks. Retries use mutation IDs to avoid duplicate writes. If a device edits stale records, the pending batch is preserved as a conflict and the server applies none of that batch. **Settings** lets you review and choose the device or server versions together, keeping branch changes coherent. Separate, non-conflicting records merge normally.
-
-Configure optional environment variables by copying `.env.example` to `.env`:
+Copy `.env.example` to `.env` for optional server configuration:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` | Listen address |
-| `PORT` | `3001` | API and production-web port |
+| `PORT` | `3001` | Web and API port |
 | `DATA_DIR` | `./data` | Persistent SQLite directory |
-| `ALLOWED_ORIGINS` | Local development origins | Comma-separated additional web origins |
-| `EXPO_PUBLIC_API_URL` | Current host / Expo development host | Default API address embedded into the client build |
+| `ALLOWED_ORIGINS` | Local development origins | Additional comma-separated browser origins |
+| `EXPO_PUBLIC_API_URL` | Current host / development host | Web default API address |
+| `STUDYSPACE_API_URL` | Empty | Native default API address at build time |
 
-The simplest deployment serves the production web app and API from the same origin. Put your HTTPS reverse proxy in front of port 3001 and persist `DATA_DIR`. A Docker setup is included:
+Serve web and API from the same HTTPS origin with a reverse proxy, and persist `DATA_DIR`. Docker is included:
 
 ```sh
 docker compose up --build -d
 ```
 
-This serves the app on port 3001 with a named volume for SQLite. Back up that volume, including SQLite’s WAL state, using an application-consistent backup or while the server is stopped. User-facing JSON exports contain study data only, not accounts or authentication credentials.
+This exposes port 3001 and uses a named SQLite volume. Use an application-consistent database backup or stop the server before copying SQLite files. JSON exports contain study records, not credentials. A serverless host needs a persistent database adapter; do not deploy this SQLite server onto an ephemeral filesystem.
 
-This personal-tool release does not include email delivery, password-reset emails, scheduled server jobs, or OS push notifications. Review reminders are visible in the app’s revision queue. There are no account emails sent by the application.
+This personal tool has no account email delivery, password-reset emails or OS push reminders. Revision reminders live in the app.
 
 ## Progress rules
 
-- Coverage counts **final checklist items**, so headings do not inflate the percentage.
-- Parents complete when all final descendants complete; the parent date is the latest descendant closing date.
-- Completing a branch preserves existing dates. Reopening clears current completion dates. No completion-event history is manufactured.
-- Confidence is independent of completion and can be edited for any topic or subject.
-- Time logged at any depth contributes to its ancestors and counts once in exam totals.
-- The main streak covers all exams. A qualifying day meets the configurable minimum number of logged minutes. Yesterday’s streak remains alive during today, and future entries do not qualify.
-- The account timezone defines today. Manually selected study dates do not shift when devices change timezone.
-- Completion forecasts use recent checklist-closing pace and are explicitly approximate; they do not estimate mastery.
-- Mock-score trends compare a single exam and test series. A series label is how you group comparable formats.
+- Coverage counts final checklist items; headings do not inflate percentages.
+- Parents close when all final descendants close, using the latest descendant closing date.
+- Completing a branch preserves existing closing dates; reopening clears current dates. There is no manufactured completion-event history.
+- Confidence is independent of completion, editable at every depth.
+- Time assigned at any depth contributes to its ancestors and counts once in exam totals.
+- The global streak uses the configurable daily minimum. Yesterday's streak remains alive during today; future entries do not qualify.
+- Account timezone defines today. Manually selected dates do not shift across timezones.
+- Forecasts use recent checklist-closing pace and are approximate, not measures of mastery.
+- Mock trends compare a single exam and test series.
 
-## Checks
+## Checks and source
 
 ```sh
 npm run check
 npm test
 npm run test:api
 npm run build
-npm run export:android
+npm run test:android
 ```
 
-Domain tests cover timezone and streak boundaries, nested coverage, time roll-up, outline import, cycle prevention, validation, edit coalescing, and edits made during sync. API integration tests use a temporary in-memory SQLite database and local HTTP server to verify authentication, account isolation, idempotent retries, conflict preservation, atomic branch changes, rollback, and logout.
-
-## Project structure
-
-```text
-src/App.tsx             Adaptive Android / desktop shell
-src/screens/            The eight application screens
-src/forms.tsx           Exam, study-session and mock forms
-src/core/               Shared domain rules and sample data
-src/store.tsx           Offline cache, account state, outbox and sync
-src/charts.tsx          Cross-platform SVG charts
-server/index.mjs        Authentication, SQLite sync and static web hosting
-shared/validation.mjs   Client/server import and record validation
-plugins/                Android manifest configuration
-scripts/                Development, offline-web and APK build helpers
-tests/                  Domain and API integration coverage
-```
-
-Architecture references: [Expo universal web development](https://docs.expo.dev/workflow/web/), [Node SQLite](https://nodejs.org/api/sqlite.html), and [Expo SecureStore](https://docs.expo.dev/versions/v55.0.0/sdk/securestore/).
+`native-android/app/src/main/java/org/studyspace/app/` contains native UI, domain rules, Room storage, sync and the signed updater. `src/` contains the desktop web client; `shared/validation.mjs` defines the server record contract; `server/index.mjs` implements authentication, sync and web hosting. `tests/` covers web domain behavior and API authentication, isolation, idempotency, conflicts, rollback and logout. Native font licenses are in `native-android/licenses/`.

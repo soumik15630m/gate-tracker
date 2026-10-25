@@ -9,17 +9,14 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "web": "node scripts/expo.mjs start --web --port 8081",
-    "android": "node scripts/expo.mjs start --android",
+    "android": "node scripts/build-native-apk.mjs --debug",
     "start": "node server/index.mjs",
     "build": "node scripts/expo.mjs export --platform web",
     "check": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:api": "node --test tests/api.test.mjs",
-    "export:android": "node scripts/expo.mjs export --platform android --output-dir build/android-bundle",
-    "prebuild:android": "node scripts/expo.mjs prebuild --platform android",
-    "apk": "node scripts/build-apk.mjs",
-    "ota:configure": "node scripts/configure-ota.mjs",
-    "ota:check": "node scripts/check-ota.mjs"
+    "test:android": "node scripts/build-native-apk.mjs --test",
+    "apk": "node scripts/build-native-apk.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-sans": "^0.4.1",

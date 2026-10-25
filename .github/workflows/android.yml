@@ -1,46 +1,85 @@
-name: Android APK
+name: Native Android
 on:
   push:
+    branches: [main]
+    paths: ['native-android/**', 'scripts/build-native-apk.mjs', '.github/workflows/android.yml']
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      profile:
-        description: Build and update channel
-        type: choice
-        options: [production, preview]
-        default: production
 permissions:
-  contents: read
+  contents: write
 concurrency:
-  group: android-${{ github.ref }}
+  group: native-android-release
   cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     env:
-      EXPO_NO_TELEMETRY: '1'
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      EAS_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
-      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
-      EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
-      EXPO_UPDATES_CHANNEL: ${{ github.event.inputs.profile || 'production' }}
-      STUDYSPACE_ALLOW_HTTP: ${{ github.event.inputs.profile == 'preview' && '1' || '0' }}
+      NATIVE_KEYSTORE_BASE64: ${{ secrets.NATIVE_KEYSTORE_BASE64 }}
+      NATIVE_KEYSTORE_PATH: ${{ github.workspace }}/signing/release.keystore
+      NATIVE_KEYSTORE_PASSWORD: ${{ secrets.NATIVE_KEYSTORE_PASSWORD }}
+      NATIVE_KEY_ALIAS: ${{ secrets.NATIVE_KEY_ALIAS }}
+      NATIVE_KEY_PASSWORD: ${{ secrets.NATIVE_KEY_PASSWORD }}
+      STUDYSPACE_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-      - run: npm run ota:check
-      - run: npm ci --no-audit --no-fund
-      - run: npm run check
-      - run: npm test
-      - run: npm run test:api
-      - uses: expo/expo-github-action@v8
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Restore signing key
+        shell: bash
+        run: |
+          test -n "$NATIVE_KEYSTORE_BASE64" || { echo 'Configure the four NATIVE_KEYSTORE signing secrets before publishing.'; exit 1; }
+          mkdir -p signing
+          printf '%s' "$NATIVE_KEYSTORE_BASE64" | base64 --decode > "$NATIVE_KEYSTORE_PATH"
+          chmod 600 "$NATIVE_KEYSTORE_PATH"
+          chmod +x native-android/gradlew
+      - name: Test, lint and build native APK
+        shell: bash
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          node scripts/build-native-apk.mjs -PreleaseVersionCode=$((200000 + GITHUB_RUN_NUMBER)) -PreleaseVersionName=2.0.$GITHUB_RUN_NUMBER
+      - uses: actions/upload-artifact@v4
         with:
-          eas-version: latest
-          packager: npm
-          token: ${{ secrets.EXPO_TOKEN }}
-      - name: Build signed APK on EAS
-        run: eas build --platform android --profile "$EXPO_UPDATES_CHANNEL" --non-interactive --wait
+          name: studyspace-native-android
+          path: |
+            build/studyspace-android.apk
+            native-android/app/build/outputs/mapping/release/mapping.txt
+            native-android/app/build/reports/tests/
+            native-android/app/build/reports/lint-results-release.html
+          retention-days: 30
+      - name: Publish signed update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const run = Number(process.env.GITHUB_RUN_NUMBER);
+          const repository = process.env.GITHUB_REPOSITORY;
+          writeFileSync('build/android-release.json', JSON.stringify({
+            versionCode: 200000 + run, versionName: `2.0.${run}`,
+            sha256: createHash('sha256').update(readFileSync('build/studyspace-android.apk')).digest('hex'),
+            apkUrl: `https://github.com/${repository}/releases/download/android-latest/studyspace-android.apk`,
+            notes: `Native Android release from ${process.env.GITHUB_SHA.slice(0, 7)}.`,
+          }, null, 2));
+          NODE
+          printf 'Native Kotlin + Compose APK. Updates preserve your data and require Android installation approval.\n\nCommit: %s\n' "$GITHUB_SHA" > build/release-notes.txt
+          if gh release view android-latest > /dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release upload android-latest build/studyspace-android.apk --clobber
+            gh release upload android-latest build/android-release.json --clobber
+            gh release edit android-latest --title "Studyspace Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
+          else
+            gh release create android-latest build/studyspace-android.apk build/android-release.json --target "$GITHUB_SHA" --title "Studyspace Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
+          fi
+      - name: Remove runner signing key
+        if: always()
+        run: rm -f "$NATIVE_KEYSTORE_PATH"

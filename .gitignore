@@ -4,6 +4,9 @@ dist/
 build/
 data/
 .env
+.env.*
+!.env.example
+.vercel/
 *.log
 android/
 ios/
@@ -11,3 +14,10 @@ ios/
 playwright-report/
 test-results/
 .gradle-cache/
+native-android/.gradle/
+native-android/.kotlin/
+native-android/**/build/
+native-android/local.properties
+signing/
+*.jks
+*.keystore

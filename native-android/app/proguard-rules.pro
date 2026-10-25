@@ -1,0 +1,3 @@
+-keepattributes Signature,InnerClasses,EnclosingMethod
+-keep class org.studyspace.app.MainActivity { *; }
+-keepclassmembers class ** { @androidx.room.* <methods>; }

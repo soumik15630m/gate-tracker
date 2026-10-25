@@ -1,0 +1,4 @@
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true"><trust-anchors><certificates src="system" /></trust-anchors></base-config>
+    <!-- The editable sync address is validated in serverAddress(): HTTP is limited to private LAN hosts. -->
+</network-security-config>

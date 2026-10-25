@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.Studyspace" parent="Theme.Studyspace.Base">
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
