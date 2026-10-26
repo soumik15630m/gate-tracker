@@ -1,0 +1,26 @@
+import React, { useState } from 'react';
+import { FlatList, Pressable, View } from 'react-native';
+import { Button, C, Input, T, s } from './ui';
+import { ImportancePicker } from './importance';
+import { useStudy } from './store';
+import { topicPath, uid, type Topic } from './core/model';
+
+export function LogSyllabusCreator({ examId, topics, selected, onSelect }: { examId: string; topics: Topic[]; selected: string; onSelect: (id: string) => void }) {
+  const store = useStudy(), [parent, setParent] = useState<string | null | undefined>(undefined), [title, setTitle] = useState(''), [lectures, setLectures] = useState(''), [tests, setTests] = useState(''), [importance, setImportance] = useState<number | null>(null), [error, setError] = useState('');
+  function start(parent: string | null) { setParent(parent); setTitle(''); setImportance(null); setLectures(''); setTests(''); setError(''); }
+  function save() { try {
+    if (!examId || !title.trim()) throw new Error('Choose an exam and enter a name.');
+    const ancestor = topics.find(t => t.id === parent); if (parent && !ancestor) throw new Error('The parent was removed. Choose another parent.');
+    const topic: Topic = { id: uid('topic'), examId, parentId: parent || null, title: title.trim(), order: Math.max(-1, ...topics.filter(t => t.parentId === parent).map(t => t.order)) + 1, completedOn: null, confidence: 'unrated', importance, ...(!parent ? { lectureCount: Number(lectures || 0), testCount: Number(tests || 0) } : {}) };
+    store.commit([{ kind: 'topic', data: topic }, ...(ancestor?.completedOn ? [{ kind: 'topic' as const, data: { ...ancestor, completedOn: null } }] : [])], 'Added to your syllabus and selected for this session.'); onSelect(topic.id); setParent(undefined);
+  } catch (e) { setError((e as Error).message); } }
+  return <View style={{ marginBottom: 18, gap: 12 }}><View style={[s.row, { flexWrap: 'wrap' }]}><Button small kind="secondary" label="+ New subject" disabled={!examId} onPress={() => start(null)} /><Button small kind="secondary" label="+ Child under selected topic" disabled={!selected} onPress={() => start(selected)} /></View>
+    {parent !== undefined && <View style={{ borderWidth: 1, borderColor: C.line, borderRadius: 12, padding: 16 }}><T muted style={{ fontSize: 11, marginBottom: 12 }}>{parent ? `New child inside ${topicPath(topics, parent)}` : 'New subject · top level'}</T><Input autoFocus focusKey={parent ? 1 : 0} label={parent ? 'New topic name' : 'New subject name'} value={title} onChange={setTitle} onSubmit={save} /><ImportancePicker value={importance} onChange={setImportance} />{!parent && <View style={s.columns}><View style={{ flex: 1 }}><Input numeric label="Total lectures" value={lectures} onChange={setLectures} /></View><View style={{ flex: 1 }}><Input numeric label="Total tests" value={tests} onChange={setTests} /></View></View>}<T muted style={{ fontSize: 11, marginBottom: 12 }}>Save and select, then add another child to keep going deeper. Your time entry stays open.</T>{!!error && <T style={{ color: C.red }}>{error}</T>}<View style={s.row}><Button small label="Add & select" onPress={save} /><Button small kind="ghost" label="Cancel creation" onPress={() => setParent(undefined)} /></View></View>}
+  </View>;
+}
+export function LogLecturePicker({ subject, used, value, onChange }: { subject?: Topic; used: Set<number>; value: number[]; onChange: (value: number[]) => void }) {
+  const [open, setOpen] = useState(false);
+  return <View style={{ marginBottom: 18, gap: 10 }}><T style={{ color: C.teal }}>Lectures completed this session · {value.length}</T><T muted style={{ fontSize: 11 }}>{subject ? `${subject.title} · ${used.size} / ${subject.lectureCount || 0} already completed` : 'Select a subject or any topic beneath it to record lectures.'}</T>
+    {!!subject?.lectureCount ? <><Button small kind="secondary" label={open ? 'Hide lecture list' : 'Choose completed lectures'} onPress={() => setOpen(!open)} />{open && <FlatList style={{ height: 210, flexGrow: 0, borderWidth: 1, borderColor: C.line, borderRadius: 10 }} nestedScrollEnabled data={Array.from({ length: subject.lectureCount }, (_, i) => i + 1)} keyExtractor={String} getItemLayout={(_, i) => ({ length: 44, offset: i * 44, index: i })} renderItem={({ item }) => <Pressable disabled={used.has(item)} accessibilityRole="checkbox" accessibilityLabel={`Lecture ${item}`} accessibilityState={{ checked: used.has(item) || value.includes(item), disabled: used.has(item) }} onPress={() => onChange(value.includes(item) ? value.filter(n => n !== item) : [...value, item].sort((a,b) => a-b))} style={{ minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', opacity: used.has(item) ? .45 : 1, backgroundColor: value.includes(item) ? C.sageWash : 'transparent' }}><T>Lecture {item}</T><T muted style={{ fontSize: 11 }}>{used.has(item) ? 'Already credited' : value.includes(item) ? '✓ Selected' : 'Select'}</T></Pressable>} />}</> : subject && <T muted style={{ fontSize: 11 }}>Set this subject’s lecture total in Syllabus, or add a subject with its total here.</T>}
+  </View>;
+}

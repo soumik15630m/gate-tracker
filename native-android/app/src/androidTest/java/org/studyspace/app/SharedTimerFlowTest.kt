@@ -55,6 +55,7 @@ class SharedTimerFlowTest {
             assertNull(runBlocking { vm.repo.timerRequest(auth, buildJsonObject { put("action", "read") }) }.timer)
             settled { vm.sharedStopwatch.state.value?.timer == null && !vm.sharedStopwatch.busy.value }
             compose.onNodeWithText("Start stopwatch").performClick()
+            compose.onNodeWithContentDescription("Close focus dial").performClick()
             settled { vm.sharedStopwatch.state.value?.timer?.origin == "Android" }
             web("pause")
             settled { vm.sharedStopwatch.state.value?.timer?.startedAt == null }

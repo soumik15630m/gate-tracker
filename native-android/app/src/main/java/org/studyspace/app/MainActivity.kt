@@ -2,6 +2,8 @@
 package org.studyspace.app
 
 import android.app.Application
+import android.content.Intent
+import androidx.lifecycle.ViewModelProvider
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -44,6 +46,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         window.decorView.setBackgroundColor(android.graphics.Color.BLACK)
         setContent { StudyTheme { StudyApp() } }
+        handleTimerIntent(intent)
+    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleTimerIntent(intent) }
+    private fun handleTimerIntent(intent: Intent?) {
+        val action = intent?.getStringExtra("timerAction") ?: return
+        val timerId = intent.getStringExtra("timerId").orEmpty(); val owner = intent.getStringExtra("timerScope").orEmpty()
+        intent.removeExtra("timerAction")
+        val vm = ViewModelProvider(this)[NativeViewModel::class.java]
+        vm.perform(false) {
+            vm.repo.ready.first { it }
+            if (action == "plan") { vm.screen.value = Screen.PLAN; return@perform }
+            val account = vm.repo.account.value
+            require((account?.scope() ?: "local") == owner) { "This timer belongs to a different account." }
+            if (account != null) {
+                vm.sharedStopwatch.connect(account); vm.sharedStopwatch.poll()
+                val state = vm.sharedStopwatch.state.value ?: return@perform
+                require(state.timer?.id == timerId) { "This stopwatch has already been logged or replaced." }
+                if (action == "finish") vm.sharedStopwatch.command("finish", state).let { current -> current.timer?.let { vm.open(Editor.LogForm(timer = it, timerScope = owner, timerVersion = current.version)) } }
+                else vm.focusDial.value = true
+            } else {
+                require(vm.stopwatch.timer.value?.id == timerId) { "This stopwatch has already been logged or replaced." }
+                if (action == "finish") vm.stopwatch.finish()?.let { vm.open(Editor.LogForm(timer = it, timerScope = owner)) }
+                else vm.focusDial.value = true
+            }
+        }
     }
 }
 enum class Screen(val title: String) { TODAY("Today"), SYLLABUS("Syllabus"), LOG("Study log"), INSIGHTS("Insights"), MORE("More"), REVISION("Revision"), MOCKS("Mock tests"), PLAN("Plan"), SETTINGS("Settings") }
@@ -91,8 +118,10 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     val editor = MutableStateFlow<Editor?>(null)
     val busy = MutableStateFlow(false)
     val workingError = MutableStateFlow("")
-    val stopwatch = NativeStopwatch(application, repo.workspace, viewModelScope)
-    val sharedStopwatch = SharedNativeStopwatch(application, repo)
+    val stopwatch = (application as StudyspaceApplication).stopwatch
+    val sharedStopwatch = (application as StudyspaceApplication).sharedStopwatch
+    val focusDial = MutableStateFlow(false)
+    val notificationOptions = MutableStateFlow(0)
     val updater = NativeUpdater(application)
     var mockDraft: MockDraft? = null
     val workspace = combine(repo.snapshot, selected) { state, selection -> state to selection }
@@ -136,6 +165,8 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     LaunchedEffect(vm) { vm.updater.checkIfDue() }
+    TimerNotificationBridge(vm)
+    TimerFocusDialog(vm)
     BackHandler(editor != null || route != Screen.TODAY) { if (editor != null) vm.dismiss() else vm.screen.value = Screen.TODAY }
     Scaffold(containerColor = Color.Black, contentColor = Palette.text, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snack) }, bottomBar = { BottomNavigation(route) { vm.screen.value = it } }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).statusBarsPadding()) {

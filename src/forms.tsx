@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Plus, Trash2 } from 'lucide-react-native';
 import { Button, C, DateField, Dialog, IconButton, Input, Select, T, s } from './ui';
+import { LogSyllabusCreator, LogLecturePicker } from './LogSyllabus';
+import { availableLectures } from './core/lectures';
 import { TopicAutocomplete } from './TopicAutocomplete';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
@@ -20,13 +22,19 @@ export function LogForm({ initial, topicId, initialActivity, draft, onSaved, sav
   const [selected, setSelected] = useState(initial?.topicId || topicId || ''), [hours, setHours] = useState(String(Math.floor((initial?.minutes ?? draft?.minutes ?? 60) / 60))), [minutes, setMinutes] = useState(String((initial?.minutes ?? draft?.minutes ?? 60) % 60)), [date, setDate] = useState(initial?.date || today), [activity, setActivity] = useState<Activity>(initial?.activity || initialActivity || 'Learning'), [note, setNote] = useState(initial?.note || draft?.note || ''), [reviewOn, setReviewOn] = useState(addDays(today, 7)), [error, setError] = useState('');
   const topics = useMemo(() => allTopics.filter(t => t.examId === examId), [data.records, examId]), roots = children(topics, null), lineage: Topic[] = []; let node = topics.find(t => t.id === selected); const seen = new Set<string>();
   while (node && !seen.has(node.id)) { seen.add(node.id); lineage.unshift(node); node = topics.find(t => t.id === node!.parentId); }
+  const [lectureDraft, setLectureDraft] = useState<{ topic: string; ids: number[] }>({ topic: '', ids: [] });
+  const lectureIds = lectureDraft.topic === selected ? lectureDraft.ids : [];
+  const lectureInfo = availableLectures(topics, list<Session>(data.records, 'session'), selected, initial?.id);
+  const preservedLectures = initial?.topicId === selected && initial?.examId === examId ? initial.lectureIds || [] : [];
   const [saving, setSaving] = useState(false);
   async function save() { if (saving) return; setSaving(true); try {
     const total = Number(hours) * 60 + Number(minutes); if (!examId || !Number.isInteger(total) || total < 1 || total > 1440 || Number(minutes) < 0 || Number(minutes) > 59 || Number(hours) < 0 || !validDate(date) || date > today) throw new Error('Choose an exam, a study date up to today, and a duration of 1 minute to 24 hours.');
-    const session: Session = { id: initial?.id || draft?.id || uid('session'), examId, topicId: selected || null, topicPath: topicPath(topics, selected) || 'Whole exam', date, minutes: total, activity, note, ...(initial?.mockId ? { mockId: initial.mockId } : {}) };
+    if (lectureIds.some(n => lectureInfo.used.has(n) || n > (lectureInfo.subject?.lectureCount || 0))) throw new Error('Some lectures are already credited or exceed the subject total. Refresh your selection.');
+    const session: Session = { id: initial?.id || draft?.id || uid('session'), examId, topicId: selected || null, topicPath: topicPath(topics, selected) || 'Whole exam', date, minutes: total, activity, note, ...(initial?.mockId ? { mockId: initial.mockId } : {}), lectureIds: [...new Set([...preservedLectures, ...lectureIds])], lectureSubjectId: lectureInfo.subject?.id || initial?.lectureSubjectId || null };
     const mutations: Mutation[] = [{ kind: 'session', data: session }];
     const topic = topics.find(t => t.id === selected);
-    if (activity === 'Revision' && topic) { if (reviewOn && !validDate(reviewOn)) throw new Error('Choose a valid next review date.'); mutations.push({ kind: 'topic', data: { ...topic, lastReviewedOn: date, reviewOn } }); }
+    if (lectureIds.length && topic) mutations.push({ kind: 'topic', data: { ...topic, lectureIds: [...new Set([...(topic.lectureIds || []), ...lectureIds])].sort((a,b) => a-b) } });
+    if (activity === 'Revision' && topic) { if (reviewOn && !validDate(reviewOn)) throw new Error('Choose a valid next review date.'); const existing = mutations.find(m => m.kind === 'topic' && m.data.id === topic.id); if (existing) existing.data = { ...existing.data as Topic, lastReviewedOn: date, reviewOn }; else mutations.push({ kind: 'topic', data: { ...topic, lastReviewedOn: date, reviewOn } }); }
     if (initial?.mockId) { const mock = list<Mock>(data.records, 'mock').find(m => m.id === initial.mockId); if (mock) mutations.push({ kind: 'mock', data: { ...mock, minutes: total, date, examId } }); }
     if (saveEntry) await saveEntry(mutations); else commit(mutations, initial ? 'Study entry updated.' : 'Study time recorded. A little further.'); await onSaved?.(); onClose();
   } catch (e) { setError((e as Error).message); } finally { setSaving(false); } }
@@ -37,6 +45,9 @@ export function LogForm({ initial, topicId, initialActivity, draft, onSaved, sav
     <Select label="Subject" value={lineage[0]?.id || ''} options={[{ value: '', label: 'Whole exam · no specific subject' }, ...roots.map(t => ({ value: t.id, label: t.title }))]} onChange={setSelected} />
     {lineage.map((parent, index) => { const options = children(topics, parent.id); return options.length ? <Select key={parent.id} label={`Inside ${parent.title}`} value={lineage[index + 1]?.id || ''} options={[{ value: '', label: `All of ${parent.title}` }, ...options.map(t => ({ value: t.id, label: t.title }))]} onChange={id => setSelected(id || parent.id)} /> : null; })}
     {selected && <T muted style={{ fontSize: 11, marginBottom: 18, lineHeight: 19 }}>{topicPath(topics, selected)}</T>}
+    <LogSyllabusCreator key={examId} examId={examId} topics={topics} selected={selected} onSelect={setSelected} />
+    {preservedLectures.length > 0 && <T muted style={{ marginBottom: 12 }}>{preservedLectures.length} lectures already attributed to this entry.</T>}
+    <LogLecturePicker key={selected} subject={lectureInfo.subject} used={lectureInfo.used} value={lectureIds} onChange={ids => setLectureDraft({ topic: selected, ids })} />
     <View style={s.columns}><View style={{ flex: 1 }}><Input label="Hours" value={hours} onChange={setHours} numeric /></View><View style={{ flex: 1 }}><Input label="Minutes" value={minutes} onChange={setMinutes} numeric /></View></View>
     <DateField label="Study date" value={date} max={today} onChange={setDate} /><Select label="Activity" value={activity} options={activities.map(value => ({ value, label: value }))} onChange={value => setActivity(value as Activity)} />
     {activity === 'Revision' && selected && <DateField label="Next review · optional" value={reviewOn} onChange={setReviewOn} optional />}

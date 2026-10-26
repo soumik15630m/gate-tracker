@@ -37,6 +37,7 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
     val clockOffset = MutableStateFlow(0L)
     val error = MutableStateFlow("")
     fun connect(account: Account) {
+        if (auth == account) return
         auth = account; checkedLegacy = false; connected.value = false; error.value = ""
         state.value = runCatching { cache.getString(account.scope(), null)?.let { codec.decodeFromString<SharedTimerState>(it) } }.getOrNull()
         clockOffset.value = cache.getLong(account.scope() + ".offset", 0)
@@ -116,7 +117,7 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
     }
     val timer = state?.timer
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
-        if (timer == null) Action(if (busy) "Starting…" else "Start stopwatch", secondary = true, enabled = connected && !busy, icon = Icons.Outlined.PlayArrow) { act("start") }
+        if (timer == null) Action(if (busy) "Starting…" else "Start stopwatch", secondary = true, enabled = connected && !busy, icon = Icons.Outlined.PlayArrow) { vm.focusDial.value = true; act("start") }
         else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(timerClock(timer.elapsed(now + offset)), fontFamily = Sans, fontSize = 21.sp, color = Palette.sage)
@@ -132,6 +133,7 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
                 }
             }
         }
+        Action("Open focus dial", secondary = true) { vm.focusDial.value = true }
         if (!connected) Text(if (error.isBlank()) "Connecting shared stopwatch…" else "Reconnecting · $error", fontFamily = Sans, color = Palette.muted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, containerColor = Palette.raised,

@@ -11,8 +11,13 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Smart topic autocomplete across deep syllabus trees, including typo tolerance, word prefixes, ancestor context and breadcrumb disambiguation. Android searches run off the UI thread; only displayed suggestions assemble breadcrumb labels.
 - Add multiple subjects or sibling child topics as editable rows in one form with a single Save all action. The name field focuses automatically; Enter saves the list, while multiline inputs retain new lines.
 - Subject-only lecture/test totals and a scrollable numbered picker when completing any branch. Selections determine chapter/subtopic counts and roll up to subject progress without duplicate credit.
-- Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision.
+- Manual study entries against any syllabus level, independent confidence, daily focus and scheduled revision. Add a subject or successive child topics inside the open logging form, with breadcrumbs and a depth-by-depth picker. Time drafts remain intact.
+- Numbered lecture completion in study entries, bounded by the subject total. Already credited lectures are disabled; the API rejects out-of-range or duplicate lecture credit. Counts roll up to the subject without automatically closing topics.
+- A monthly lecture calendar in Plan: set daily subject lecture targets, edit or remove them, and see progress calculated from lectures logged for that day. Changing an entry date updates daily progress. Plans never add study minutes.
 - One-tap stopwatch on every screen, with pause/resume and Finish & log. Signed-in accounts share one timer across web and Android: a compact header identifies where it started, either device controls it, and foreground clients refresh about every two seconds. Server timestamps keep elapsed time consistent; background clients catch up on reopening. Finishing pauses without logging, and saving atomically creates one study entry and clears the timer across devices. Closing the form retains the paused timer. Shared controls need a connection; offline displays show the last known state. Signed-out timers stay on their device. Earlier unsaved local timers are imported once when possible and preserved in a recovery copy.
+- A large OLED focus dial with calm breathing animation and reduced-motion support. Start opens the dial immediately; the compact header remains available across screens.
+- Optional Android stopwatch notifications with a live chronometer, pause/resume quick actions, Finish & log, and a separate lock-screen visibility choice. Enabled notifications keep an active shared timer connected in the background; force-stopping the app or phone power controls can interrupt background refresh.
+- Optional Android evening reminders for unfinished lecture targets, including missed days. Reminder time is adjustable and delivery is approximate under Android background scheduling. Stopwatch and planner notifications have separate controls.
 - Mock results, section scores, comparable-series trends, mistake journals and optional deduplicated study entries.
 - Streaks, heatmaps, study-time trends, coverage, subject distribution, neglected subjects and approximate completion forecasts.
 - Hover/focus/tap chart details on web, tap study charts on Android, and quick revision scheduling from Today.
@@ -21,6 +26,8 @@ A personal exam-preparation workspace for **native Android and desktop web**. An
 - Native signed-APK update checks, checksum and certificate verification, and Android-approved installation.
 
 The initial local workspace contains **labelled sample data**. Use **Settings → Start fresh** for your own data. A newly created sync account starts empty. Export/import transfers local work into that account.
+
+Lecture attribution (`lectureIds`, `lectureSubjectId`) and daily targets (`lectureTarget`) are optional JSON fields. Old entries and backups remain valid; no data reset, backfill, or Room schema migration is needed. Update Android before using the new calendar targets on web. Syllabus progress and study history are separate: deleting a time entry removes its calendar credit while keeping the syllabus lecture selections until you edit them.
 
 Shared timers use an additive `account_timers` table, separate from preparation records. Existing users, syllabi, study entries and backups are retained.
 

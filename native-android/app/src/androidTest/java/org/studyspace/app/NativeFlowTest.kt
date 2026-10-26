@@ -56,6 +56,7 @@ class NativeFlowTest {
         settled { vm.workspace.value.exam?.id == exam.id }
         compose.onNodeWithText("Start stopwatch").performClick()
         assertNull(vm.editor.value)
+        compose.onNodeWithContentDescription("Close focus dial").performClick()
         settled { vm.stopwatch.timer.value != null }
         val id = vm.stopwatch.timer.value!!.id
         compose.onNodeWithText("Pause", useUnmergedTree = true).performClick()

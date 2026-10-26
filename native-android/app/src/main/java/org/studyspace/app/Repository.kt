@@ -17,6 +17,9 @@ import java.util.concurrent.TimeUnit
 
 class StudyspaceApplication : Application() {
     val repository by lazy { StudyRepository(this) }
+    private val timerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val stopwatch by lazy { NativeStopwatch(this, repository.workspace, timerScope) }
+    val sharedStopwatch by lazy { SharedNativeStopwatch(this, repository) }
     override fun onCreate() { super.onCreate(); repository.initialize() }
 }
 class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
@@ -107,6 +110,7 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
     private suspend fun current(key: String) = withContext(Dispatchers.Default) {
         StudySnapshot(dao.records(key).map { it.wire() }, dao.pending(key).size, dao.conflicts(key).map { it.value() }, dao.meta(key)?.sample ?: false)
     }
+    suspend fun readCurrent(): StudySnapshot { initializing?.join(); return writes.withLock { current(activeScope()) } }
     suspend fun edit(message: String = "Saved", expectedScope: String? = null, action: (StudySnapshot) -> List<Mutation>) = withContext(Dispatchers.IO) {
         initializing?.join()
         writes.withLock {
@@ -203,6 +207,8 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
     }
     suspend fun signOut() = withContext(Dispatchers.IO) {
         val previous = _account.value
+        androidx.core.app.NotificationManagerCompat.from(context).cancel(LECTURE_NOTIFICATION_ID)
+        context.stopService(android.content.Intent(context, TimerNotificationService::class.java))
         writes.withLock { vault.write(null); _account.value = null; undo = null }
         WorkManager.getInstance(context).cancelUniqueWork("studyspace-periodic-sync")
         if (previous != null) runCatching { request(previous.server + "/api/auth/logout", buildJsonObject {}, previous.token) }

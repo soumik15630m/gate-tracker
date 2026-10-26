@@ -186,20 +186,34 @@ import kotlinx.coroutines.withContext
     var note by rememberSaveable { mutableStateOf(original?.note ?: editor.timer?.let { "Stopwatch · ${timerClock(it.elapsed())}" }.orEmpty()) }
     val id = rememberSaveable { original?.id ?: editor.timer?.id ?: uid("session") }
     val index = rememberExamIndex(w, exam)
+    var lectureIds by rememberSaveable(topic) { mutableStateOf(emptySet<Int>()) }
+    val subject = index.subjects[topic]
+    val used by produceState(emptySet<Int>(), index, subject, w.state.sessions) { value = withContext(Dispatchers.Default) { if (subject == null) emptySet() else index.content(subject.id).lectures + w.state.sessions.filter { it.lectureSubjectId == subject.id && it.id != original?.id }.flatMap { it.lectureIds } } }
+    val preservedLectures = if (original?.topicId == topic && original?.examId == exam) original.lectureIds else emptyList()
     EditorFrame("Time, well spent.", vm, onSave = {
         vm.perform {
             require(editor.timer == null || vm.repo.workspace.value == editor.timerScope) { "Return to the account where this stopwatch was started." }
             val h = hours.toIntOrNull() ?: error("Enter whole hours."); val m = minutes.toIntOrNull() ?: error("Enter whole minutes.")
             require(h >= 0 && m in 0..59 && h * 60 + m in 1..1440) { "Log between 1 minute and 24 hours, with minutes from 0 to 59." }
             val path = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == exam }).path(topic).takeLast(10000) }
-            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId)
+            require(lectureIds.all { it !in used && it <= (subject?.lectureCount ?: 0) }) { "Some lectures were already credited. Refresh your selection." }
+            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId, (preservedLectures + lectureIds).distinct().sorted(), subject?.id ?: original?.lectureSubjectId)
             if (editor.timerVersion != null) {
                 vm.repo.sync()
                 vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry)
                 vm.repo.sync()
                 vm.repo.messages.emit("Study time recorded across your devices")
             } else {
-                vm.repo.commit(listOf(mutation("session", entry)), "Study time logged", expectedScope = editor.timerScope)
+                vm.repo.edit("Study time logged", expectedScope = editor.timerScope) { state ->
+                    val changes = mutableListOf(mutation("session", entry))
+                    if (lectureIds.isNotEmpty()) {
+                        val tree = TopicIndex(state.topics); val latest = tree.byId[topic] ?: error("The selected topic was removed.")
+                        val root = tree.subjects[latest.id] ?: error("Choose a subject.")
+                        require(lectureIds.none { it in tree.content(root.id).lectures }) { "Some lectures were already completed. Choose remaining lectures." }
+                        changes.add(mutation("topic", latest.copy(lectureIds = (latest.lectureIds + lectureIds).distinct().sorted())))
+                    }
+                    changes
+                }
                 editor.timer?.let { vm.stopwatch.consume(it.id, editor.timerScope.orEmpty()) }
             }
         }
@@ -207,6 +221,10 @@ import kotlinx.coroutines.withContext
         if (editor.timer != null) Body("Your stopwatch is paused. Time is rounded to whole minutes; adjust it if needed. Closing keeps your unsaved timer. Create an exam workspace first if you do not have one yet.")
         ExamChoice(w, exam) { exam = it; topic = null }
         TopicSelector("Subject or any syllabus level", index, topic, { topic = it })
+        LogTopicPath(index, topic) { topic = it }
+        LogSyllabusCreator(w, vm, exam, topic) { topic = it }
+        if (preservedLectures.isNotEmpty()) Body("${preservedLectures.size} lectures already attributed to this entry.")
+        LogLecturePicker(subject, used, lectureIds) { lectureIds = it }
         DateField("Study date", date, { date = it })
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Hours", hours, { hours = it }, Modifier.weight(1f), numeric = true); Field("Minutes", minutes, { minutes = it }, Modifier.weight(1f), numeric = true) }
         Choice("Activity", activity, activityLabels.map { it to it }) { activity = it }

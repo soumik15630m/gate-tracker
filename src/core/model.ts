@@ -3,11 +3,11 @@ export type Confidence = 'unrated' | 'needs-work' | 'getting-there' | 'confident
 export type Activity = 'Learning' | 'Revision' | 'Practice' | 'Mock test';
 export interface Exam { id: string; name: string; date: string; weeklyTarget: number; archived: boolean; description?: string }
 export interface Topic { id: string; examId: string; parentId: string | null; title: string; order: number; completedOn: string | null; confidence: Confidence; reviewOn?: string; lastReviewedOn?: string; focusOn?: string; lectureCount?: number | null; testCount?: number | null; lectureIds?: number[]; testIds?: number[]; importance?: number | null }
-export interface Session { id: string; examId: string; topicId: string | null; topicPath: string; date: string; minutes: number; activity: Activity; note: string; mockId?: string }
+export interface Session { id: string; examId: string; topicId: string | null; topicPath: string; date: string; minutes: number; activity: Activity; note: string; mockId?: string; lectureIds?: number[]; lectureSubjectId?: string | null }
 export interface MockSection { name: string; score: number; maximum: number }
 export interface Mistake { topicId: string | null; category: 'Concept gap' | 'Recall' | 'Calculation' | 'Misreading' | 'Time pressure'; note: string }
 export interface Mock { id: string; examId: string; name: string; series: string; date: string; score: number; maximum: number; minutes: number; correct?: number; incorrect?: number; unattempted?: number; sections: MockSection[]; mistakes: Mistake[] }
-export interface Task { id: string; examId: string; title: string; type: 'inbox' | 'milestone' | 'plan'; date: string; done: boolean; topicId?: string | null; minutes?: number | null; activity?: Activity | null; notes?: string | null }
+export interface Task { id: string; examId: string; title: string; type: 'inbox' | 'milestone' | 'plan'; date: string; done: boolean; topicId?: string | null; minutes?: number | null; activity?: Activity | null; notes?: string | null; lectureTarget?: number | null }
 export interface Reflection { id: string; examId: string; week: string; worked: string; improve: string; next: string }
 export interface Preferences { id: 'preferences'; timezone: string; streakMinimum: number; displayName: string }
 export type Entity = Exam | Topic | Session | Mock | Task | Reflection | Preferences;

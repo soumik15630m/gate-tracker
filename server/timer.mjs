@@ -40,11 +40,24 @@ export function timerLogWrites(input, records) {
   const byId = new Map(records.map(record => [record.id, record]));
   if (byId.has(input.entry.id)) throw fail(409, 'This stopwatch already has a study entry. Refresh your study log.');
   const writes = [{ id: input.entry.id, kind: 'session', data: input.entry, deleted: false }];
+  if (input.entry.lectureIds?.length) {
+    const topic = byId.get(input.entry.topicId), subject = byId.get(input.entry.lectureSubjectId);
+    if (!topic || topic.deleted || topic.kind !== 'topic' || !subject || subject.deleted || subject.kind !== 'topic' || subject.data.parentId !== null || subject.data.examId !== input.entry.examId) throw fail(400, 'Select a valid subject or topic for completed lectures.');
+    let ancestor = topic; const seen = new Set();
+    while (ancestor && ancestor.data.parentId && !seen.has(ancestor.id)) { seen.add(ancestor.id); ancestor = byId.get(ancestor.data.parentId); }
+    if (ancestor?.id !== subject.id) throw fail(400, 'The selected lectures belong to a different subject.');
+    const previous = new Set(input.entry.lectureIds);
+    const existingCredit = records.filter(r => !r.deleted && r.kind === 'topic').some(r => (r.data.lectureIds || []).some(n => previous.has(n)) && (() => { let a = r; const visited = new Set(); while (a?.data.parentId && !visited.has(a.id)) { visited.add(a.id); a = byId.get(a.data.parentId); } return a?.id === subject.id; })());
+    if (existingCredit) throw fail(409, 'Some lectures were already completed. Refresh and choose remaining lectures.');
+    const updated = { ...topic, data: { ...topic.data, lectureIds: [...new Set([...(topic.data.lectureIds || []), ...input.entry.lectureIds])].sort((a,b) => a-b) } };
+    writes.push(updated); byId.set(updated.id, updated);
+  }
   if (input.review != null) {
     const topic = byId.get(input.entry.topicId);
     if (input.entry.activity !== 'Revision' || !topic || topic.deleted || topic.kind !== 'topic') throw fail(400, 'Choose a valid revision topic.');
     const data = { ...topic.data, lastReviewedOn: input.entry.date, reviewOn: input.review.reviewOn };
     if (!validateEntity('topic', data)) throw fail(400, 'Choose a valid next review date.');
+    const previousIndex = writes.findIndex(w => w.id === topic.id); if (previousIndex >= 0) writes.splice(previousIndex, 1);
     writes.push({ id: topic.id, kind: 'topic', data, deleted: false });
   }
   for (const write of writes) byId.set(write.id, write);

@@ -4,6 +4,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DomainTest {
+    @Test fun `lecture targets track logged days and missing days without counting planned time`() {
+        val root = Topic("lecture-root", "lecture-exam", title = "Networks", lectureCount = 3)
+        val plan = StudyTask("lecture-target", root.examId, "Daily lectures", "plan", "2026-10-26", topicId = root.id, lectureTarget = 2)
+        val session = StudySession("lecture-entry", root.examId, root.id, root.title, "2026-10-26", 45, lectureIds = listOf(1,2), lectureSubjectId = root.id)
+        validate("task", jsonOf(plan)); validate("session", jsonOf(session))
+        val records = listOf(mutation("exam", Exam(root.examId, "Exam", "2027-02-07")), mutation("topic", root), mutation("task", plan)).map { WireRecord(it.id,it.kind,it.data) }
+        validateRelationships(records)
+        assertEquals(0, lectureDay(emptyList(),root.id,plan.date)); assertEquals(2, lectureDay(listOf(session,session),root.id,plan.date))
+        assertTrue(missingLectureDays(StudySnapshot(records), "2026-10-26", false).isEmpty())
+        assertEquals(2, missingLectureDays(StudySnapshot(records), "2026-10-26", true).single().remaining)
+        assertEquals(2, missingLectureDays(StudySnapshot(records), "2026-10-27", false).single().remaining)
+        val logged = WireRecord(session.id,"session",jsonOf(session))
+        assertTrue(missingLectureDays(StudySnapshot(records+logged), "2026-10-27", false).isEmpty())
+        assertTrue(runCatching { validateRelationships(records + logged.copy(data=jsonOf(session.copy(lectureIds=listOf(4))))) }.isFailure)
+        assertTrue(runCatching { validateRelationships(records + logged + logged.copy(id="another",data=jsonOf(session.copy(id="another")))) }.isFailure)
+    }
+
     @Test fun `stopwatch excludes pauses restores running time and rounds only when logging`() {
         val paused = StudyTimer("timer", startedAt = 1000).pause(61000)
         assertEquals(60000L, paused.elapsed(500000))

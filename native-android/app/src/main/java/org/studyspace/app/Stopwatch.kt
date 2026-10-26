@@ -55,7 +55,7 @@ class NativeStopwatch(context: Context, workspace: StateFlow<String>, coroutineS
     LaunchedEffect(timer) { now = System.currentTimeMillis(); if (timer?.startedAt != null) while (true) { delay(1000); now = System.currentTimeMillis() } }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         if (timer == null) {
-            Action("Start stopwatch", secondary = true, icon = Icons.Outlined.PlayArrow) { vm.stopwatch.start() }
+            Action("Start stopwatch", secondary = true, icon = Icons.Outlined.PlayArrow) { vm.focusDial.value = true; vm.stopwatch.start() }
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(timerClock(timer!!.elapsed(now)), color = Palette.sage, fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 24.sp, modifier = Modifier.weight(1f))
@@ -70,6 +70,7 @@ class NativeStopwatch(context: Context, workspace: StateFlow<String>, coroutineS
             }
         }
     }
+    Action("Open focus dial", secondary = true) { vm.focusDial.value = true }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, containerColor = Palette.raised,
         title = { Text("Discard unsaved time?", color = Palette.text) },
         text = { Body("This removes ${timerClock(timer?.elapsed(now) ?: 0)} from the stopwatch. Saved study entries stay as they are.") },

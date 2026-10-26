@@ -121,11 +121,12 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
         item { PageHeading("Your effort, remembered", "Time well spent.", "Log the time you studied, against any syllabus level.") }
         item { Action("Log study time", Modifier.fillMaxWidth(), icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.quickLog() } }
         item { StatPair({ Stat("TOTAL EFFORT", duration(w.sessions.sumOf { it.minutes }), "${w.sessions.size} study entries", it) }, { Stat("STUDY DAYS", w.days.filter { it.key <= w.day }.size.toString(), "Every day adds up", it, Palette.teal) }) }
-        if (ordered.isEmpty()) item { EmptyCard("Make your first entry", "No timer to manage. Just the time you studied and the topic you worked on.") }
+        if (ordered.isEmpty()) item { EmptyCard("Make your first entry", "Log your study time, lectures and topic, or start a focus stopwatch.") }
         items(ordered, key = { it.id }, contentType = { "session" }) { session ->
             Card(Modifier.clickable { vm.open(Editor.LogForm(session)) }) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Chip(session.activity, selected = true, color = if (session.activity == "Revision") Palette.teal else Palette.sage); Text(duration(session.minutes), fontFamily = Serif, color = Palette.text, fontSize = 25.sp) }
                 Text(session.topicPath.ifBlank { w.state.exams.firstOrNull { it.id == session.examId }?.name ?: "General study" }, fontFamily = Sans, color = Palette.text, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (session.lectureIds.isNotEmpty()) Body("${session.lectureIds.size} lectures completed · ${session.lectureIds.joinToString()}", color = Palette.sage)
                 if (session.note.isNotBlank()) Body(session.note, maxLines = 3)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body(displayDate(session.date)); Body("Edit entry", color = Palette.sage) }
             }
@@ -243,13 +244,14 @@ class InsightMetrics(w: Workspace, period: Int) {
         item { PageHeading("A direction, not a deadline", "Make space for what’s next.", "Your exams, weekly intentions, and moments to reflect.") }
         item { Action("Add an exam", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } }
         items(w.state.exams.sortedBy { it.date }, key = { "exam-${it.id}" }, contentType = { "exam" }) { exam -> Card(Modifier.clickable { vm.open(Editor.ExamForm(exam)) }, title = exam.name, subtitle = displayDate(exam.date)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${dayDifference(w.day, exam.date).coerceAtLeast(0)} days", fontFamily = Serif, fontSize = 28.sp, color = Palette.sage); Body(if (exam.archived) "Archived" else "${formatScore(exam.weeklyTarget)}h / week") }; if (exam.description.orEmpty().isNotBlank()) Body(exam.description.orEmpty()); Action("Open workspace", secondary = true) { vm.select(exam.id); vm.screen.value = Screen.TODAY } } }
+        item { LectureCalendar(w, vm) }
         item { SectionTitle("Your detailed study plan", "Dated blocks, clear goals and time to work.") }
         item { Action("Create detailed plan", icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.open(Editor.TaskForm(type = "plan")) } }
         item {
-            val blocks = w.tasks.filter { it.type == "plan" }; val planned = blocks.sumOf { it.minutes ?: 0 }; val done = blocks.filter { it.done }.sumOf { it.minutes ?: 0 }
+            val blocks = w.tasks.filter { it.type == "plan" && it.lectureTarget == null }; val planned = blocks.sumOf { it.minutes ?: 0 }; val done = blocks.filter { it.done }.sumOf { it.minutes ?: 0 }
             if (blocks.isNotEmpty()) Card { Body("${blocks.count { it.done }} / ${blocks.size} blocks complete / ${duration(done)} of ${duration(planned)} planned"); Meter(if (planned == 0) 0 else done * 100 / planned) }
         }
-        items(w.tasks.filter { it.type == "plan" }.sortedBy { it.date }, key = { "plan-${it.id}" }, contentType = { "study-block" }) { block ->
+        items(w.tasks.filter { it.type == "plan" && it.lectureTarget == null }.sortedBy { it.date }, key = { "plan-${it.id}" }, contentType = { "study-block" }) { block ->
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(block.done, { checked -> vm.save(listOf(mutation("task", block.copy(done = checked))), "Study plan updated", false) }); Body(block.title, Modifier.weight(1f).clickable { vm.open(Editor.TaskForm(block, "plan")) }, Palette.text) }
                 Body("${displayDate(block.date)} / ${duration(block.minutes ?: 0)} / ${block.activity}")

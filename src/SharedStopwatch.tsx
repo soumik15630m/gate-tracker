@@ -1,3 +1,4 @@
+import { StopwatchDial } from './StopwatchDial';
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,7 +15,7 @@ interface TimerAccount { server: string; token: string; user: { id: string } }
 export function SharedStopwatch({ account, storageKey }: { account: TimerAccount; storageKey: string }) {
   const store = useStudy(), w = useWorkspace();
   const [state, setState] = useState<SharedTimerState | null>(null), [connected, setConnected] = useState(false), [busy, setBusy] = useState(false), [now, setNow] = useState(Date.now()), [offset, setOffset] = useState(0);
-  const [logging, setLogging] = useState<SharedTimerState | null>(null), [discard, setDiscard] = useState(false);
+  const [logging, setLogging] = useState<SharedTimerState | null>(null), [discard, setDiscard] = useState(false), [focus, setFocus] = useState(false);
   const current = useRef<SharedTimerState | null>(null), clockOffset = useRef(0), alive = useRef(true), pending = useRef(0), queue = useRef(Promise.resolve()), writes = useRef(Promise.resolve()), lastSaved = useRef<string | null>(null);
   function apply(next: SharedTimerState, skew: number) {
     if (!alive.current || current.current && next.version < current.current.version) return;
@@ -84,7 +85,7 @@ export function SharedStopwatch({ account, storageKey }: { account: TimerAccount
     setBusy(true);
     try {
       await store.sync();
-      const entry = mutations.find(m => m.kind === 'session')!.data as Session, review = mutations.find(m => m.kind === 'topic')?.data as any;
+      const entry = mutations.find(m => m.kind === 'session')!.data as Session, review = entry.activity === 'Revision' ? mutations.find(m => m.kind === 'topic')?.data as any : null;
       await request({ action: 'log', version: logging.version, id: logging.timer.id, device: 'Web', entry, ...(review ? { review: { reviewOn: review.reviewOn } } : {}) });
       await store.sync(); store.notify('Study time recorded across your devices.');
     } finally { if (alive.current) setBusy(false); }
@@ -93,12 +94,14 @@ export function SharedStopwatch({ account, storageKey }: { account: TimerAccount
   return <View style={{ paddingHorizontal: w.desktop ? 42 : 20, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.line }}>
     <View style={[s.row, { flexWrap: 'wrap', justifyContent: 'space-between', gap: 10 }]}>
       <View style={[s.row, { flexWrap: 'wrap' }]}><Timer size={17} color={C.sage} /><T muted style={{ fontSize: 11 }}>{timer ? `${timer.startedAt === null ? timer.finished ? 'Ready to log' : 'Paused' : 'One timer running'} · started on ${timer.origin || 'another device'}` : state ? 'Shared across your devices' : 'Connecting stopwatch…'}</T>{timer && <T style={{ fontSize: 20, color: C.sage, fontVariant: ['tabular-nums'] }}>{timerClock(duration)}</T>}</View>
-      <View style={[s.row, { flexWrap: 'wrap', gap: 8 }]}>{!timer ? <Button small kind="secondary" label={busy ? 'Starting…' : 'Start stopwatch'} icon={Play} disabled={disabled} onPress={() => { void action('start'); }} /> : <>
+      <View style={[s.row, { flexWrap: 'wrap', gap: 8 }]}>{!timer ? <Button small kind="secondary" label={busy ? 'Starting…' : 'Start stopwatch'} icon={Play} disabled={disabled} onPress={() => { setFocus(true); void action('start'); }} /> : <>
         <Button small kind="secondary" label={timer.startedAt === null ? 'Resume' : 'Pause'} icon={timer.startedAt === null ? Play : Pause} disabled={disabled} onPress={() => { void action(timer.startedAt === null ? 'resume' : 'pause'); }} />
-        <Button small label={timer.finished ? 'Log time' : 'Finish & log'} disabled={disabled} onPress={() => { void action('finish').then(next => { if (next) setLogging(next); }); }} />
+        <Button small label={timer.finished ? 'Log time' : 'Finish & log'} disabled={disabled} onPress={() => { void action('finish').then(next => { if (next) { setFocus(false); setLogging(next); } }); }} />
         <Button small kind="ghost" label="Discard" disabled={disabled} onPress={() => setDiscard(true)} />
       </>}</View>
     </View>
+    <Button small kind="ghost" label="Open focus dial" onPress={() => setFocus(true)} />
+    <Dialog open={focus} title="Make room for focus." onClose={() => setFocus(false)}><StopwatchDial elapsed={duration} running={!!timer && timer.startedAt !== null} label={!timer ? 'Ready when you are' : timer.startedAt === null ? 'Paused' : 'Studying'} /><View style={[s.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 12 }]}>{!timer ? <Button label="Start stopwatch" icon={Play} disabled={disabled} onPress={() => { void action('start'); }} /> : <><Button label={timer.startedAt === null ? 'Resume' : 'Pause'} icon={timer.startedAt === null ? Play : Pause} disabled={disabled} kind="secondary" onPress={() => { void action(timer.startedAt === null ? 'resume' : 'pause'); }} /><Button label="Finish & log" disabled={disabled} onPress={() => { void action('finish').then(next => { if (next) { setFocus(false); setLogging(next); } }); }} /></>}</View><T muted style={{ textAlign: 'center', fontSize: 10, marginTop: 20 }}>{connected ? 'One shared timer. Pause or resume from either device.' : 'Reconnecting. Your elapsed time is kept.'}</T></Dialog>
     {!connected && state && <T muted style={{ fontSize: 10, marginTop: 6 }}>Reconnecting · showing the last known timer. Controls return when connected.</T>}
     {logging?.timer && (w.exams.length ? <LogForm key={logging.version} draft={{ id: logging.timer.id, minutes: timerMinutes(logging.timer, Date.now() + clockOffset.current), note: `Stopwatch · ${timerClock(elapsedMs(logging.timer, Date.now() + clockOffset.current))}` }} saveEntry={save} onClose={() => setLogging(null)} /> : <Dialog open title="Your shared time is kept" onClose={() => setLogging(null)}><T muted>Create an exam workspace, then choose Log time again.</T><Button label="Create exam workspace" onPress={() => { setLogging(null); w.openExam(); }} /></Dialog>)}
     <Dialog open={discard} title="Discard this shared timer?" onClose={() => setDiscard(false)}><T muted style={{ marginBottom: 20 }}>This removes the unsaved timer from all your devices. Saved study entries stay as they are.</T><Button label="Keep timer" kind="secondary" onPress={() => setDiscard(false)} /><Button label="Discard shared timer" kind="ghost" disabled={disabled} onPress={() => { void action('discard').then(next => { if (next) setDiscard(false); }); }} /></Dialog>

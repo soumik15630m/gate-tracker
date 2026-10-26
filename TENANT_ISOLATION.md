@@ -15,7 +15,7 @@ Reviewed on 25 October 2026. A tenant is one registered user account; sharing a 
 
 `npm run test:api` includes `tests/tenant-isolation.test.mjs`. It exercises the local SQLite handler; the same test can target `createCloudHandler` through the existing isolated PostgreSQL fixture.
 
-Result on the review date: all fifteen API test cases passed against SQLite and the isolated PostgreSQL handler, including six tenant-specific subtests and six shared-timer subtests. TypeScript checking, all twenty-four web domain/search/timer tests, sixteen native unit tests and eight Android instrumented tests also passed. No cross-account access was found in these tested paths. This is not a claim that every possible attack has been excluded.
+Result on the review date: all sixteen API test cases passed against SQLite and the isolated PostgreSQL handler, including six tenant-specific subtests and six shared-timer subtests. TypeScript checking, all twenty-seven web domain/search/timer/planner tests, seventeen native unit tests and eleven Android instrumented tests also passed. No cross-account access was found in these tested paths. This is not a claim that every possible attack has been excluded.
 
 The suite creates disposable accounts and checks:
 
@@ -36,3 +36,5 @@ This is application-enforced isolation in shared tables, not database-enforced r
 The bearer token grants access to its account. Browser storage on a shared OS/browser profile is not a security boundary against someone who can inspect that profile: account caches are retained after logout for offline continuity. Android account caches likewise remain on the device, while its login token is encrypted with Android Keystore. This review does not claim protection against compromised devices, stolen tokens, or database administrators.
 
 Shared stopwatches use one `account_timers` row per authenticated user. The API ignores client-supplied identity fields, reads/writes only the session owner, serializes mutations with that user's existing write lock, and rejects stale timer versions. Logging a timer and clearing it occur in the same transaction; retries do not create another entry. Shared timer caches remain separated by server and user on both clients. `tests/shared-timer.test.mjs` covers cross-device controls, colliding actions, unauthorized access and account isolation on SQLite and the isolated PostgreSQL fixture.
+
+Lecture entries use optional subject IDs and numbered lecture attribution. Validation requires a matching subject, lecture numbers within its total, and unique credit; daily targets must reference an owned subject and fit its total. These checks run in both sync handlers and native local storage. New lecture and planner fields do not require deleting or resetting existing records. Android notification intents carry a timer ID and account scope; actions verify both before controlling a timer.
