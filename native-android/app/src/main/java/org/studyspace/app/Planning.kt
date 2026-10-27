@@ -83,9 +83,9 @@ fun scheduledChanges(before: List<WireRecord>, changes: List<Mutation>): List<Mu
     return (changes+preferences+buildSchedule(state,state.today).writes).associateBy { it.id }.values.toList()
 }
 data class LectureForecast(val done: Int, val remaining: Int?, val recent: Int, val finish: String?)
-fun lectureForecast(root: Topic, state: StudySnapshot, day: String): LectureForecast {
+fun lectureForecast(root: Topic, state: StudySnapshot, day: String, index: TopicIndex = TopicIndex(state.topics)): LectureForecast {
     val entries=state.sessions.filter { it.lectureSubjectId==root.id }
-    val done=(TopicIndex(state.topics).content(root.id).lectures+entries.flatMap { it.lectureIds }).size
+    val done=(index.content(root.id).lectures+entries.flatMap { it.lectureIds }).size
     val recent=entries.filter { it.date>=addDays(day,-27) && it.date<=day }.flatMap { it.lectureIds }.distinct().size
     val remaining=root.lectureCount?.takeIf { it>0 }?.let { (it-done).coerceAtLeast(0) }
     return LectureForecast(done,remaining,recent,if (remaining!=null && remaining>0 && recent>=3) addDays(day,ceil(remaining*28.0/recent).toLong()) else null)

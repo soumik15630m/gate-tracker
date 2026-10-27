@@ -245,5 +245,14 @@ class NativeFlowTest {
             compose.runOnIdle { vm.screen.value = screen }
             compose.waitForIdle()
         }
+        compose.runOnIdle { vm.screen.value=Screen.PLAN }
+        compose.onNodeWithTag("Plan content").performScrollToNode(hasText("Scheduling preferences"))
+        compose.onNodeWithText("Scheduling preferences").performScrollTo().performClick()
+        settled { vm.plannerDialog.value?.examId==exam.id }
+        settled { compose.onAllNodesWithTag("Scheduling subjects").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("Scheduling subjects").performScrollToIndex(5000)
+        compose.onNodeWithText("Topic 4999").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithTag("Automatic lecture pace · 0 disables").fetchSemanticsNodes().size<10)
+        compose.onNodeWithText("Close",useUnmergedTree=true).performClick()
     }
 }

@@ -1,11 +1,12 @@
 package org.studyspace.app
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -26,12 +27,12 @@ import kotlinx.coroutines.withContext
         val calculation=withContext(Dispatchers.Default) { runCatching { buildSchedule(w.state,w.day) } }
         value=calculation.getOrNull();forecastError=calculation.exceptionOrNull()?.message.orEmpty()
     }
-    val forecasts by produceState<Map<String,LectureForecast>>(emptyMap(),w) { value=withContext(Dispatchers.Default) { roots.associate { it.id to lectureForecast(it,w.state,w.day) } } }
+    val forecasts by produceState<Map<String,LectureForecast>>(emptyMap(),w) { value=withContext(Dispatchers.Default) { roots.take(12).associate { it.id to lectureForecast(it,w.state,w.day,w.index) } } }
     val missed=w.tasks.filter { it.lectureTarget!=null && it.date<w.day && !it.locked && it.carriedOn==null && lectureDay(w.sessions,it.topicId.orEmpty(),it.date)<it.lectureTarget }
     Card(title="Your automatic study plan",subtitle="Save lecture totals to update future calendar targets automatically.") {
         Action("Scheduling preferences",secondary=true) { vm.plannerDialog.value=PlannerRequest(exam.id) }
         if(forecastError.isNotBlank()) Body(forecastError,color=Palette.gold)
-        roots.forEach { root ->
+        roots.take(12).forEach { root ->
             val summary=result?.summaries?.firstOrNull { it.subjectId==root.id }; val forecast=forecasts[root.id]
             Body(root.title,color=Palette.text)
             Body(if ((root.schedulePace ?: 0)>0) "${root.schedulePace} lectures / ${if(root.paceMode=="weekly") "week" else "study day"}" else "Automatic scheduling off")
@@ -42,6 +43,7 @@ import kotlinx.coroutines.withContext
             if ((summary?.remaining ?: 0)>0) Body("${summary?.remaining} lectures do not fit before your deadline. Increase pace, study days or daily capacity.",color=Palette.gold)
             Body(if (forecast?.remaining==0) "All configured lectures completed." else forecast?.finish?.let { "At your actual recent pace: around ${displayDate(it)}. Based on ${forecast.recent} lectures in 28 calendar days." } ?: "A completion forecast appears after 3 logged lectures in 28 days, with a subject total set.")
         }
+        if(roots.size>12) Body("${roots.size-12} more subjects. Open scheduling preferences or edit a subject in Syllabus to adjust its pace.")
         if (missed.isNotEmpty()) Action("Catch up · ${missed.size} missed targets",secondary=true) { vm.plannerDialog.value=PlannerRequest(exam.id,true) }
         Body("Past days, days with recorded lectures, and locked targets stay in place. Future targets reflect unfinished lectures.")
     }
@@ -81,14 +83,19 @@ data class PlannerRequest(val examId: String, val catchUp: Boolean = false)
     var modes by rememberSaveable { mutableStateOf(roots.associate { it.id to it.paceMode }) }
     Dialog(onClose,properties=DialogProperties(usePlatformDefaultWidth=false)) {
         Card(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(18.dp),title="Your study rhythm") {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-                DateField("Start date",start,{start=it})
-                DateField("Planning end · optional, no later than exam date",end,{end=it},allowEmpty=true)
-                listOf("Sun","Mon","Tue","Wed","Thu","Fri","Sat").forEachIndexed { n,label -> ToggleLine(label,n in days,{days=if(it) days+n else days-n}) }
-                Field("Rest dates · YYYY-MM-DD separated by commas",rests,{rests=it})
-                Field("Maximum total lectures per day · optional",limit,{limit=it},numeric=true)
-                roots.forEach { root -> Body(root.title,color=Palette.text); PaceFields(paces[root.id].orEmpty(),modes[root.id] ?: "daily",{paces=paces+(root.id to it)},{modes=modes+(root.id to it)}) }
-                Body("Saving rebuilds future unlocked targets immediately. Current progress and past days stay protected. Capacity shortfalls appear beside each subject.")
+            LazyColumn(Modifier.weight(1f).testTag("Scheduling subjects"),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                item(key="dates") { Column(verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                    DateField("Start date",start,{start=it})
+                    DateField("Planning end · optional, no later than exam date",end,{end=it},allowEmpty=true)
+                    listOf("Sun","Mon","Tue","Wed","Thu","Fri","Sat").forEachIndexed { n,label -> ToggleLine(label,n in days,{days=if(it) days+n else days-n}) }
+                    Field("Rest dates · YYYY-MM-DD separated by commas",rests,{rests=it})
+                    Field("Maximum total lectures per day · optional",limit,{limit=it},numeric=true)
+                } }
+                items(roots,key={it.id}) { root -> Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    Body(root.title,color=Palette.text)
+                    PaceFields(paces[root.id].orEmpty(),modes[root.id] ?: "daily",{paces=paces+(root.id to it)},{modes=modes+(root.id to it)})
+                } }
+                item(key="details") { Body("Saving rebuilds future unlocked targets immediately. Current progress and past days stay protected. Capacity shortfalls appear beside each subject.") }
             }
             Action("Save rhythm & update calendar") { vm.perform(false) {
                 val schedule=Schedule(start,end,days.sorted(),rests.split(Regex("[\\s,]+")).filter { it.isNotEmpty() },if(limit.isBlank()) null else limit.toIntOrNull() ?: error("Enter a whole daily capacity."))
