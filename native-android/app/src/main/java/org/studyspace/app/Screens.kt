@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -35,7 +36,7 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
     val due = remember(w) { w.topics.filter { !it.reviewOn.isNullOrBlank() && it.reviewOn <= w.day }.sortedBy { it.reviewOn } }
     val focus = remember(w) { w.topics.filter { it.focusOn == w.day } }
     val weeklyValues = remember(w) { (0L..6L).map { w.days[addDays(weekStart(w.day), it)] ?: 0 } }
-    LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(modifier=Modifier.testTag("Today content"),contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "heading") { PageHeading("One day at a time", "Make today count.", if (w.state.preferences.displayName.isBlank()) "A quiet space for meaningful progress." else "Welcome back, ${w.state.preferences.displayName}.") }
         if (w.activeExams.isEmpty()) {
             item { EmptyCard("Your next chapter starts here", "Add a study goal, bring in your syllabus, and take your first small step.") { Action("Create your first study goal", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } } }
@@ -242,7 +243,7 @@ class InsightMetrics(w: Workspace, period: Int) {
 }
 
 @Composable fun PlanScreen(w: Workspace, vm: NativeViewModel) {
-    LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(modifier=Modifier.testTag("Plan content"),contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageHeading("A direction, not a deadline", "Make space for what’s next.", "Your exams, weekly intentions, and moments to reflect.") }
         item { Action("Add a study goal", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } }
         items(w.state.exams.sortedBy { it.date }, key = { "exam-${it.id}" }, contentType = { "exam" }) { exam -> Card(Modifier.clickable { vm.open(Editor.ExamForm(exam)) }, title = exam.name, subtitle = displayDate(exam.date)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(if(exam.date.isBlank()) "Open-ended" else "${dayDifference(w.day, exam.date).coerceAtLeast(0)} days", fontFamily = Serif, fontSize = 28.sp, color = Palette.sage); Body(if (exam.archived) "Archived" else "${formatScore(exam.weeklyTarget)}h / week") }; if (exam.description.orEmpty().isNotBlank()) Body(exam.description.orEmpty()); Action("Open workspace", secondary = true) { vm.select(exam.id); vm.screen.value = Screen.PLAN } } }

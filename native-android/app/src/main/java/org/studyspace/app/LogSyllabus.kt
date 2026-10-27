@@ -10,6 +10,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 @Composable fun LogSyllabusCreator(w: Workspace, vm: NativeViewModel, exam: String, selected: String?, onSelect: (String) -> Unit) {
@@ -69,7 +70,7 @@ import androidx.compose.ui.unit.dp
         Body(subject?.let { "${it.title} · ${used.size} completed" + (if((it.lectureCount ?: 0)>0) " / ${it.lectureCount}" else " · total not set") } ?: "Choose a subject or any topic inside it.")
         if ((subject?.lectureCount ?: 0) > 0) {
             Action(if (expanded) "Hide lecture list" else "Choose completed lectures", secondary = true) { expanded = !expanded }
-            if (expanded) LazyColumn(Modifier.fillMaxWidth().height(220.dp)) {
+            if (expanded) LazyColumn(Modifier.fillMaxWidth().height(220.dp).testTag("Lecture number list")) {
                 items((1..subject!!.lectureCount!!).toList(), key = { it }) { n ->
                     fun toggle() { if (n !in used) onChange(if (n in selected) selected - n else selected + n) }
                     Row(Modifier.fillMaxWidth().height(48.dp).clickable(enabled = n !in used, role = Role.Checkbox) { toggle() }, verticalAlignment = Alignment.CenterVertically) {

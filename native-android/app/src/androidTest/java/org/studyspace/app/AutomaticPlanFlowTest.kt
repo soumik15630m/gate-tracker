@@ -33,8 +33,10 @@ class AutomaticPlanFlowTest {
         runBlocking { vm.repo.commit(listOf(mutation("task",locked.copy(locked=true)))) }
         compose.runOnIdle { vm.open(Editor.LogForm(topic=leaf.id,initialActivity="Practice")) }
         compose.onNodeWithText("Choose completed lectures").performScrollTo().performClick()
-        compose.onNodeWithText("Lecture 1").performScrollTo().performTouchInput { click() }
-        compose.onNodeWithText("Lecture 2").performScrollTo().performTouchInput { click() }
+        compose.onNodeWithTag("Lecture number list").performScrollTo().performScrollToIndex(0)
+        compose.onNodeWithText("Lecture 1").performTouchInput { click() }
+        compose.onNodeWithTag("Lecture number list").performScrollToIndex(1)
+        compose.onNodeWithText("Lecture 2").performTouchInput { click() }
         compose.onNodeWithText("Record question practice").performScrollTo().performClick()
         compose.onNodeWithTag("Correct answers").performScrollTo().performTextReplacement("8")
         compose.onNodeWithTag("Incorrect answers").performScrollTo().performTextReplacement("2")
@@ -51,9 +53,11 @@ class AutomaticPlanFlowTest {
         assertEquals(5,state.topics.first { it.id==leaf.id }.importance)
         assertTrue(state.topics.all { it.completedOn==null })
         compose.runOnIdle { vm.screen.value=Screen.TODAY }
-        compose.onNodeWithText("Your daily agenda").performScrollTo().assertExists()
+        compose.onNodeWithTag("Today content").performScrollToNode(hasText("Your daily agenda"))
+        compose.onNodeWithText("Your daily agenda").assertExists()
         compose.runOnIdle { vm.screen.value=Screen.PLAN }
-        compose.onNodeWithText("Scheduling preferences").performScrollTo().performClick()
+        compose.onNodeWithTag("Plan content").performScrollToNode(hasText("Scheduling preferences"))
+        compose.onNodeWithText("Scheduling preferences").performClick()
         compose.onNodeWithText("Your study rhythm").assertExists()
         compose.onNodeWithText("Close",useUnmergedTree=true).performClick()
     }
