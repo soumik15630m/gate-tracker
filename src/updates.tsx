@@ -29,6 +29,7 @@ export function UpdateProvider({children}:{children:ReactNode}) {
   },[enabled,check]);
   const apply=useCallback(async()=>{
     if(!enabled)return;
+    if(document.querySelector('[data-testid="study-dialog"]')) { study.notify('Finish or close your open form before updating. Your saved progress is safe.'); return; }
     if(!navigator.onLine){study.notify('Reconnect to download the update. Your study data stays on this device.');return;}
     try{await study.flush();}catch{study.notify('Could not save your latest changes. Export a backup before updating.');return;}
     if('serviceWorker' in navigator) await navigator.serviceWorker.getRegistration().then(r=>r?.update()).catch(()=>{});
