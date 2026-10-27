@@ -27,7 +27,8 @@ class SplitAndRestoreFlowTest {
         compose.runOnIdle { vm.select(exam.id);vm.open(Editor.LogForm(topic=a.id)) }
         compose.onNodeWithText("+ Add another subject or topic").performScrollTo().performClick()
         compose.onNodeWithTag("Topic selector Find subject or subtopic · entry 2").performScrollTo().performClick()
-        compose.onNodeWithTag("Search topics").performTextReplacement("packet swithcing").performImeAction()
+        compose.onNodeWithTag("Search topics").performTextReplacement("packet swithcing")
+        compose.onNodeWithTag("Search topics").performImeAction()
         settled { compose.onAllNodesWithContentDescription("Close topic picker").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithText("Split time equally").performScrollTo().performClick()
         compose.onNodeWithTag("Minutes for entry 1").performScrollTo().assertTextContains("30")
