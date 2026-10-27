@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Button, C, Checkbox, DateField, Dialog, Input, Panel, Select, T, s } from './ui';
 import { useStudy } from './store';
@@ -14,10 +14,12 @@ export function PaceFields({ pace, mode, onPace, onMode }: { pace:string; mode:s
 export function AutoPlanner() {
   const store = useStudy(), w = useWorkspace(), exam = w.exam;
   const [open,setOpen] = useState(false), [catchUp,setCatchUp] = useState(false), [from,setFrom] = useState(w.today), [to,setTo] = useState(addDays(w.today,6));
+  const projection=useMemo(()=>{try{return {...buildSchedule(Object.values(store.data.records),w.today),error:''};}catch(e){return {writes:[],summaries:[],error:(e as Error).message};}},[store.data.records,w.today]);
   if (!exam) return null;
-  const roots = w.topics.filter(t=>t.parentId===null), summaries = buildSchedule(Object.values(store.data.records),w.today).summaries;
+  const roots = w.topics.filter(t=>t.parentId===null), summaries = projection.summaries;
   const tasks = list<Task>(store.data.records,'task').filter(t=>t.examId===exam.id), missed = tasks.filter(t=>t.lectureTarget && t.date<w.today && !t.carriedOn && !t.locked && w.sessions.filter(s=>s.lectureSubjectId===t.topicId&&s.date===t.date).reduce((n,s)=>n+(s.lectureIds?.length||0),0)<t.lectureTarget);
   return <><Panel title="Your automatic study plan" subtitle="Set your rhythm once. Saving lecture totals, pace or deadlines updates future targets." action={<Button small label="Scheduling preferences" onPress={()=>setOpen(true)} />}>
+    {!!projection.error&&<T style={{color:C.gold}}>{projection.error}</T>}
     {roots.map(root=>{ const summary=summaries.find(s=>s.subjectId===root.id), forecast=lectureForecast(root,w.topics,w.sessions,w.today); return <View key={root.id} style={{paddingVertical:16,borderTopWidth:1,borderColor:C.line,gap:9}}><T>{root.title}</T><T muted>{root.schedulePace ? `${root.schedulePace} lectures / ${root.paceMode==='weekly'?'week':'study day'}` : 'Automatic scheduling off'} · {root.lectureCount ? `${forecast.done} / ${root.lectureCount} completed` : 'Open-ended lecture total'}</T>{summary?.missingDeadline && <T style={{color:C.gold}}>Choose an exam date or planner end date to schedule this subject.</T>}{summary?.rangeTooLong && <T style={{color:C.gold}}>Choose a planning window of up to two years.</T>}{!!summary?.overbooked && <T style={{color:C.gold}}>Protected future targets exceed remaining lectures by {summary.overbooked}. Edit or unlock those targets.</T>}{!!summary?.remaining && <T style={{color:C.gold}}>{summary.remaining} lectures do not fit before your deadline. Increase this subject’s pace, add study days, or raise daily capacity.</T>}<T muted style={{fontSize:11,lineHeight:19}}>{forecast.remaining===0 ? 'All configured lectures completed.' : forecast.finish ? `At your actual recent pace: around ${prettyDate(forecast.finish,true)}. Based on ${forecast.recent} lectures in 28 calendar days.` : root.lectureCount ? 'An actual-pace forecast appears after 3 logged lectures in the last 28 days.' : 'Set a total for a completion forecast; daily targets continue through your end date.'}</T></View>;})}
     {!roots.length&&<T muted>Add subjects in Syllabus to build your automatic plan.</T>}
     {!!missed.length&&<Button label={`Catch up · ${missed.length} missed targets`} kind="secondary" onPress={()=>setCatchUp(true)} />}

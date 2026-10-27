@@ -56,7 +56,7 @@ import java.time.format.DateTimeFormatter
         plans.filter { it.date == day }.forEach { plan ->
             val done = lectureDay(w.sessions, plan.topicId.orEmpty(), day); val total = plan.lectureTarget ?: 0
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Body(roots.firstOrNull { it.id == plan.topicId }?.title ?: plan.title, color = Palette.text); Body("$done / $total lectures · ${(total - done).coerceAtLeast(0)} remaining", color = if (done >= total) Palette.teal else Palette.sage) }
+                Column(Modifier.weight(1f)) { Body(roots.firstOrNull { it.id == plan.topicId }?.title ?: plan.title, color = Palette.text); Body("$done / $total lectures · "+(if((plan.carriedCount ?: 0)>0) "${plan.carriedCount} reserved for catch-up · ${(total-done-(plan.carriedCount ?: 0)).coerceAtLeast(0)} still to place" else "${(total-done).coerceAtLeast(0)} remaining"), color = if (done >= total) Palette.teal else Palette.sage) }
                 IconAction("Edit lecture target", Icons.Outlined.Edit) { subject = plan.topicId.orEmpty(); target = total.toString() }
                 IconAction(if(plan.automatic) "Make this a rest day" else "Remove lecture target", Icons.Outlined.DeleteOutline) { vm.perform(false) { vm.repo.edit("Lecture target removed. Automatic planning respects this rest day.") { state -> listOf(mutation("task",plan,true))+if(plan.automatic) state.exams.firstOrNull { it.id==plan.examId }?.let { listOf(mutation("exam",it.copy(schedule=(it.schedule ?: Schedule(w.day)).copy(restDates=((it.schedule?.restDates ?: emptyList())+plan.date).distinct())))) } .orEmpty() else emptyList() } } }
             }

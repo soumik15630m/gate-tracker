@@ -24,11 +24,16 @@ import kotlinx.coroutines.withContext
     var start by rememberSaveable { mutableStateOf(w.day) }
     var end by rememberSaveable { mutableStateOf(addDays(w.day,6)) }
     val roots=w.index.children[null].orEmpty()
-    val result by produceState<ScheduleResult?>(null,w) { value=withContext(Dispatchers.Default) { buildSchedule(w.state,w.day) } }
+    var forecastError by remember { mutableStateOf("") }
+    val result by produceState<ScheduleResult?>(null,w) {
+        val calculation=withContext(Dispatchers.Default) { runCatching { buildSchedule(w.state,w.day) } }
+        value=calculation.getOrNull();forecastError=calculation.exceptionOrNull()?.message.orEmpty()
+    }
     val forecasts by produceState<Map<String,LectureForecast>>(emptyMap(),w) { value=withContext(Dispatchers.Default) { roots.associate { it.id to lectureForecast(it,w.state,w.day) } } }
     val missed=w.tasks.filter { it.lectureTarget!=null && it.date<w.day && !it.locked && it.carriedOn==null && lectureDay(w.sessions,it.topicId.orEmpty(),it.date)<it.lectureTarget }
     Card(title="Your automatic study plan",subtitle="Save lecture totals to update future calendar targets automatically.") {
         Action("Scheduling preferences",secondary=true) { settings=true }
+        if(forecastError.isNotBlank()) Body(forecastError,color=Palette.gold)
         roots.forEach { root ->
             val summary=result?.summaries?.firstOrNull { it.subjectId==root.id }; val forecast=forecasts[root.id]
             Body(root.title,color=Palette.text)

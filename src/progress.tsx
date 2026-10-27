@@ -24,7 +24,7 @@ export function SubjectCounts({ topic }: { topic: Topic }) {
   return <View><T muted style={{ marginBottom: 14 }}>Subject totals</T><View style={s.columns}><View style={{ flex: 1 }}><Input label="Lecture count" numeric value={lectures} onChange={setLectures} /></View><View style={{ flex: 1 }}><Input label="Test count" numeric value={tests} onChange={setTests} /></View></View><PaceFields pace={pace} mode={mode} onPace={setPace} onMode={v=>setMode(v as 'daily'|'weekly')} /><Button small kind="secondary" label="Save subject totals" onPress={() => {
     const lectureCount = Number(lectures || 0), testCount = Number(tests || 0), used = contentProgress(w.topics, topic.id);
     if (![lectureCount, testCount].every(n => Number.isInteger(n) && n >= 0 && n <= 10000)) return store.notify('Use whole counts between 0 and 10,000.');
-    if ([...used.lectures].some(n => n > lectureCount) || [...used.tests].some(n => n > testCount)) return store.notify('Totals must include your already recorded lecture and test numbers.');
+    if (lectureCount > 0 && [...used.lectures].some(n => n > lectureCount) || [...used.tests].some(n => n > testCount)) return store.notify('Totals must include your already recorded lecture and test numbers.');
     store.commit([{ kind: 'topic', data: { ...topic, lectureCount, testCount, schedulePace:Number(pace), paceMode:mode } }], 'Subject totals saved. Future schedule updated automatically.');
   }} /></View>;
 }

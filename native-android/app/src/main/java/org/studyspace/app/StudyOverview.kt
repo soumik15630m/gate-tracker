@@ -45,7 +45,7 @@ import kotlinx.coroutines.withContext
         Body("$credited / $planned planned lectures credited to their scheduled days",color=Palette.teal)
         Meter(if(planned==0) 0 else credited*100/planned)
         Body("${duration(entries.sumOf { it.minutes })} logged · ${duration(tasks.filter { it.lectureTarget==null }.sumOf { it.minutes ?: 0 })} in timed study blocks")
-        Body("Actual time includes all logged sessions. Lecture counts are kept separate from planned study hours.")
+        Body("Actual time includes all logged sessions. Original missed targets stay in this comparison; daily intentions include rescheduled days. Lecture counts stay separate from study hours.")
     }
     Card(title="Practice, measured honestly",subtitle="This week · attempted = correct + incorrect") {
         Body("${stats.attempted} attempted · ${stats.accuracy?.let { "$it%" } ?: "—"} accuracy · ${stats.skipped} skipped",color=Palette.teal)

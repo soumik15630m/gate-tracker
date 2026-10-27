@@ -89,3 +89,7 @@ test('automatic planning stops at the workspace limit instead of allocating an u
   const records=[...seed(),...Array.from({length:19998},(_,i)=>record('task',{id:`note_${i}`,examId:exam.id,title:'Note',type:'inbox',date:'',done:false}))];
   assert.throws(()=>buildSchedule(records,day),/20,000/);
 });
+test('capacity tie-breaks use the same identifier ordering as Kotlin on every locale',()=>{
+  const records=[record('exam',{...exam,schedule:{...exam.schedule,dailyLimit:1}}),record('topic',{...root,id:'a',lectureCount:1}),record('topic',{...root,id:'B',lectureCount:1})];
+  const result=buildSchedule(records,day);assert.equal(plans(apply(records,result.writes)).find(t=>t.date===day)?.topicId,'B');
+});

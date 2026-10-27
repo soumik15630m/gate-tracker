@@ -22,7 +22,7 @@ export function buildSchedule(records, today) {
   for (const { data: exam } of live.filter(r => r.kind === 'exam')) {
     if (exam.archived) continue;
     const settings = exam.schedule || scheduleDefaults(today), end = settings.end && exam.date ? (settings.end < exam.date ? settings.end : exam.date) : settings.end || exam.date;
-    const roots = topics.filter(t => t.examId === exam.id && t.parentId === null && t.schedulePace > 0).sort((a,b) => a.order - b.order || a.id.localeCompare(b.id));
+    const roots = topics.filter(t => t.examId === exam.id && t.parentId === null && t.schedulePace > 0).sort((a,b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     if (!roots.length) continue;
     const from = settings.start > today ? settings.start : today;
     const removed = new Set(tasks.filter(t => t.examId === exam.id && t.automatic && !t.locked && !t.done && t.date >= today && lectureCredit(sessions, t.topicId, t.date) === 0).map(t => t.id));

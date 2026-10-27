@@ -81,10 +81,11 @@ jobs:
         run: |
           node scripts/native-test-server.mjs > build/ui-test-api.log 2>&1 &
           api_pid=$!
-          "$ANDROID_HOME/emulator/emulator" -avd study-tracker-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > build/ui-test-emulator.log 2>&1 &
+          "$ANDROID_HOME/emulator/emulator" -avd study-tracker-ci -port 5554 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > build/ui-test-emulator.log 2>&1 &
           emulator_pid=$!
           trap 'kill "$api_pid" "$emulator_pid" 2>/dev/null || true' EXIT
-          adb wait-for-device
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:3137/api/health
+          if ! timeout 180 adb wait-for-device; then tail -100 build/ui-test-emulator.log; exit 1; fi
           timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
           adb shell input keyevent 82
           adb shell settings put global window_animation_scale 0
