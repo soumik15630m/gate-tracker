@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      ANDROID_AVD_HOME: ${{ runner.temp }}/study-tracker-avd
+      ANDROID_AVD_HOME: /tmp/study-tracker-ci-avd
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v4
