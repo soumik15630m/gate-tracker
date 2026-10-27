@@ -15,7 +15,10 @@ import org.junit.runner.RunWith
 class SplitAndRestoreFlowTest {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
     private val vm get()=ViewModelProvider(compose.activity)[NativeViewModel::class.java]
-    private fun settled(predicate:()->Boolean)=compose.waitUntil(30000,predicate)
+    private fun settled(predicate:()->Boolean) {
+        try { compose.waitUntil(30000,predicate) }
+        catch(failure:Throwable) { throw AssertionError("Workspace=${vm.workspace.value.exam?.id}, topics=${vm.workspace.value.topics.map { it.id }}, error=${vm.workingError.value}; " + runCatching { compose.onRoot(useUnmergedTree=true).printToString() }.getOrDefault("Tree unavailable"),failure) }
+    }
     @Test fun splitLogFindsDeepTopicsAndCountsTheBlockOnlyOnce() {
         settled { vm.repo.ready.value }
         val exam=Exam("split-flow-exam","Split study","2027-02-07")
@@ -24,7 +27,9 @@ class SplitAndRestoreFlowTest {
         val parent=Topic("split-flow-parent",exam.id,b.id,"Switching")
         val leaf=Topic("split-flow-leaf",exam.id,parent.id,"Packet switching")
         runBlocking { vm.repo.signOut();vm.repo.startFresh();vm.repo.commit(listOf(mutation("exam",exam))+listOf(a,b,parent,leaf).map { mutation("topic",it) }) }
-        compose.runOnIdle { vm.select(exam.id);vm.open(Editor.LogForm(topic=a.id)) }
+        compose.runOnIdle { vm.select(exam.id) }
+        settled { vm.workspace.value.exam?.id==exam.id && vm.workspace.value.topics.any { it.id==leaf.id } }
+        compose.runOnIdle { vm.open(Editor.LogForm(topic=a.id)) }
         compose.onNodeWithText("+ Add another subject or topic").performScrollTo().performClick()
         compose.onNodeWithTag("Topic selector Find subject or subtopic · entry 2").performScrollTo().performClick()
         compose.onNodeWithTag("Search topics").performTextReplacement("packet swithcing")
