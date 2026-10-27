@@ -52,6 +52,8 @@ jobs:
   android-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      ANDROID_AVD_HOME: ${{ runner.temp }}/study-tracker-avd
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v4
@@ -72,7 +74,10 @@ jobs:
         run: |
           sudo chmod 666 /dev/kvm
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' emulator 'system-images;android-36;google_apis;x86_64'
-          echo no | avdmanager create avd --force --name study-tracker-ci --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name study-tracker-ci --path "$ANDROID_AVD_HOME/study-tracker-ci.avd" --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          printf 'avd.ini.encoding=UTF-8\npath=%s/study-tracker-ci.avd\ntarget=android-36\n' "$ANDROID_AVD_HOME" > "$ANDROID_AVD_HOME/study-tracker-ci.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           mkdir -p signing build
           keytool -genkeypair -keystore signing/development.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable UI Test'
           chmod +x native-android/gradlew
