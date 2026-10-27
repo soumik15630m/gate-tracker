@@ -315,7 +315,7 @@ class InsightMetrics(w: Workspace, period: Int) {
             Body(updates.message)
             updates.release?.let { if (it.notes.isNotBlank()) Body(it.notes.take(1200)) }
             updates.progress?.let { LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth(), color = Palette.sage); Body("$it% downloaded") }
-            if (updates.verifiedApk != null) Action("Install verified update", Modifier.fillMaxWidth()) { vm.updater.install() }
+            if (updates.verifiedApk != null) Action("Install verified update", Modifier.fillMaxWidth()) { vm.perform(false) { if(!vm.updater.install()) vm.repo.messages.emit(vm.updater.state.value.message) } }
             else if (updates.release != null && updates.progress == null) Action("Download signed update", Modifier.fillMaxWidth()) { vm.perform(false) { vm.updater.download() } }
             Action(if (updates.checking) "Checking…" else "Check GitHub releases", Modifier.fillMaxWidth(), secondary = true, enabled = !updates.checking && updates.progress == null) { vm.perform(false) { vm.updater.check() } }
             Body("APK checksum and signing certificate are verified before Android asks you to approve installation.")

@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
     LaunchedEffect(release?.versionCode,canShow) {
         if(release!=null && canShow && announced!=release.versionCode) {
             announced=release.versionCode
-            if(snackbar.showSnackbar("Study Tracker ${release.versionName} is ready",actionLabel="Update",withDismissAction=true,duration=SnackbarDuration.Long)==SnackbarResult.ActionPerformed) scope.launch { vm.updater.updateNow(); if(vm.updater.state.value.verifiedApk==null) vm.repo.messages.emit(vm.updater.state.value.message) }
+            if(snackbar.showSnackbar("Study Tracker ${release.versionName} is ready",actionLabel="Update",withDismissAction=true,duration=SnackbarDuration.Long)==SnackbarResult.ActionPerformed) scope.launch { if(!vm.updater.updateNow()) vm.repo.messages.emit(vm.updater.state.value.message) }
         }
     }
 }
@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
             if(state.verifiedApk!=null) Body("Verified update · your study data stays in place")
         }
         Action(if(state.verifiedApk!=null) "Install update" else "Update now",secondary=true,enabled=state.progress==null) {
-            scope.launch { vm.updater.updateNow(); if(vm.updater.state.value.verifiedApk==null) vm.repo.messages.emit(vm.updater.state.value.message) }
+            scope.launch { if(!vm.updater.updateNow()) vm.repo.messages.emit(vm.updater.state.value.message) }
         }
     }
 }

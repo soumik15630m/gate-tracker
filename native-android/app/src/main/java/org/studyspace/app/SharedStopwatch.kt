@@ -22,7 +22,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
-@Serializable data class SharedTimerState(val version: Long = 0, val timer: StudyTimer? = null, val lastSavedId: String? = null, val serverNow: Long = 0)
+@Serializable data class SharedTimerState(val version: Long = 0, val timer: StudyTimer? = null, val lastSavedId: String? = null, val serverNow: Long = 0, val splitLogging: Boolean = false)
 class SharedTimerChanged(message: String, val state: SharedTimerState) : IllegalStateException(message)
 
 class SharedNativeStopwatch(context: Context, private val repo: StudyRepository) {
@@ -58,7 +58,7 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
         if (auth != account || repo.account.value != account || result.version < (state.value?.version ?: -1)) return
         val previous = state.value
         val previousSaved = previous?.lastSavedId
-        if (previous?.version != result.version) state.value = result; clockOffset.value = offset; connected.value = true; error.value = ""
+        if (previous?.version != result.version || previous?.splitLogging != result.splitLogging) state.value = result; clockOffset.value = offset; connected.value = true; error.value = ""
         if (previous?.version != result.version) cache.edit().putString(account.scope(), codec.encodeToString(result)).putLong(account.scope() + ".offset", offset).apply()
         if (result.lastSavedId != null && result.lastSavedId != previousSaved) repo.sync()
     }
@@ -76,15 +76,32 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
             }
         }
     }
-    suspend fun command(action: String, expected: SharedTimerState = state.value ?: kotlin.error("Connect the stopwatch first."), entry: StudySession? = null, reviewOn: String? = null): SharedTimerState {
+    suspend fun command(action: String, expected: SharedTimerState = state.value ?: kotlin.error("Connect the stopwatch first."), entry: StudySession? = null, reviewOn: String? = null, entries: List<StudySession>? = null, totalMinutes: Int? = null): SharedTimerState {
+        require(entries==null || state.value?.splitLogging==true) { "Update your sync server before saving a split stopwatch session." }
         busy.value = true
         try {
             return requests.withLock {
                 val account = auth ?: kotlin.error("Sign in to control your shared timer.")
-                send(account, buildJsonObject { put("action", action); put("version", expected.version); put("device", "Android"); expected.timer?.let { put("id", it.id) }; entry?.let { put("entry", jsonOf(it)) }; reviewOn?.let { put("review",buildJsonObject { put("reviewOn",it) }) } })
+                send(account, buildJsonObject {
+                    put("action",action);put("version",expected.version);put("device","Android")
+                    expected.timer?.let { put("id",it.id) }
+                    entry?.let { put("entry",jsonOf(it)) }
+                    entries?.let { values -> put("entries",buildJsonArray { values.forEach { add(jsonOf(it)) } });put("totalMinutes",totalMinutes) }
+                    if (reviewOn!=null) {
+                        val reviews=(entries ?: listOfNotNull(entry)).filter { it.activity=="Revision" && it.topicId!=null }.distinctBy { it.topicId }
+                        if(entries==null && reviews.isNotEmpty()) put("review",buildJsonObject { put("reviewOn",reviewOn) })
+                        else put("reviews",buildJsonArray { reviews.forEach { add(buildJsonObject { put("topicId",it.topicId);put("reviewOn",reviewOn) }) } })
+                    }
+                })
             }
         } finally { busy.value = false }
     }
+    suspend fun checkpoint() = requests.withLock { withContext(Dispatchers.IO) {
+        val account=auth ?: return@withContext
+        require(repo.account.value==account) { "The account changed. Try the update again." }
+        val current=state.value ?: return@withContext
+        check(cache.edit().putString(account.scope(),codec.encodeToString(current)).putLong(account.scope()+".offset",clockOffset.value).commit()) { "Could not save the shared stopwatch cache. The update has been postponed." }
+    } }
 }
 
 @Composable fun SharedStudyStopwatch(vm: NativeViewModel, account: Account) {

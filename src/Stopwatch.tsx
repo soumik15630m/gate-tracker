@@ -1,3 +1,4 @@
+import { FocusDialog } from './FocusDialog';
 import { StopwatchDial } from './StopwatchDial';
 import { SharedStopwatch } from './SharedStopwatch';
 import React, { useEffect, useRef, useState } from 'react';
@@ -6,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pause, Play, Timer, Trash2 } from 'lucide-react-native';
 import { Button, C, Dialog, T, s } from './ui';
 import { LogForm } from './forms';
+import { registerTimerCheckpoint } from './core/timerCheckpoint';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
 import { uid } from './core/model';
@@ -20,6 +22,7 @@ function LocalStopwatch({ storageKey }: { storageKey: string }) {
   const store = useStudy(), workspace = useWorkspace();
   const [timer, setTimer] = useState<StudyTimer | null>(null), [ready, setReady] = useState(false), [now, setNow] = useState(Date.now()), [logging, setLogging] = useState(false), [discard, setDiscard] = useState(false), [focus, setFocus] = useState(false);
   const writes = useRef(Promise.resolve());
+  useEffect(()=>registerTimerCheckpoint(storageKey,async()=>{await writes.current;}),[storageKey]);
   useEffect(() => { let active = true; AsyncStorage.getItem(storageKey).then(value => { if (active) { const restored = readTimer(value); const alreadySaved = restored && store.data.records[restored.id] && !store.data.records[restored.id].deleted; setTimer(alreadySaved ? null : restored); if (alreadySaved) AsyncStorage.removeItem(storageKey).catch(() => {}); setReady(true); } }).catch(() => store.notify('Could not restore the stopwatch. Reload to try again.')); return () => { active = false; }; }, [storageKey]);
   useEffect(() => { if (!timer || timer.startedAt === null) return; setNow(Date.now()); const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, [timer]);
   function update(value: StudyTimer | null) {
@@ -41,7 +44,7 @@ function LocalStopwatch({ storageKey }: { storageKey: string }) {
       </View>
     </View>
     <Button small kind="ghost" label="Open focus dial" onPress={() => setFocus(true)} />
-    <Dialog open={focus} title="Make room for focus." onClose={() => setFocus(false)}><StopwatchDial elapsed={duration} running={!!timer && timer.startedAt !== null} label={!timer ? 'Ready when you are' : timer.startedAt === null ? 'Paused' : 'Studying'} /><View style={[s.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 12 }]}>{!timer ? <Button label="Start stopwatch" icon={Play} onPress={() => update({ id: uid('session'), accumulatedMs: 0, startedAt: Date.now() })} /> : <><Button label={timer.startedAt === null ? 'Resume' : 'Pause'} kind="secondary" onPress={() => update(timer.startedAt === null ? resumeTimer(timer) : pauseTimer(timer))} /><Button label="Finish & log" onPress={() => { update(pauseTimer(timer)); setFocus(false); setLogging(true); }} /></>}</View></Dialog>
+    <FocusDialog open={focus} onClose={() => setFocus(false)}><StopwatchDial elapsed={duration} running={!!timer && timer.startedAt !== null} label={!timer ? 'Ready when you are' : timer.startedAt === null ? 'Paused' : 'Studying'} /><View style={[s.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 12 }]}>{!timer ? <Button label="Start stopwatch" icon={Play} onPress={() => update({ id: uid('session'), accumulatedMs: 0, startedAt: Date.now() })} /> : <><Button label={timer.startedAt === null ? 'Resume' : 'Pause'} kind="secondary" onPress={() => update(timer.startedAt === null ? resumeTimer(timer) : pauseTimer(timer))} /><Button label="Finish & log" onPress={() => { update(pauseTimer(timer)); setFocus(false); setLogging(true); }} /></>}</View></FocusDialog>
     {logging && timer && (workspace.exams.length ? <LogForm draft={{ id: timer.id, minutes: timerMinutes(timer), note: `Stopwatch · ${timerClock(elapsedMs(timer))}` }} onSaved={async () => { await store.flush(); update(null); }} onClose={() => setLogging(false)} /> : <Dialog open title="Your time is kept" onClose={() => setLogging(false)}><T muted style={{ marginBottom: 20 }}>Create an exam workspace, then choose Finish & log again. Your stopwatch stays paused.</T><Button label="Create exam workspace" onPress={() => { setLogging(false); workspace.openExam(); }} /></Dialog>)}
     <Dialog open={discard} title="Discard this stopwatch?" onClose={() => setDiscard(false)}><T muted style={{ marginBottom: 20 }}>This removes {timerClock(duration)} of unsaved time. Your saved study entries stay as they are.</T><Button label="Keep studying" kind="secondary" onPress={() => setDiscard(false)} /><Button label="Discard unsaved time" kind="ghost" onPress={() => { update(null); setDiscard(false); }} /></Dialog>
   </View>;

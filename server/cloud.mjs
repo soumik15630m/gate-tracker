@@ -138,7 +138,7 @@ export function createCloudHandler(options = {}) {
             if (input.action === 'log') {
               const writes = timerLogWrites(input, (await client.query('SELECT * FROM records WHERE user_id=$1', [session.user_id])).rows.map(unpack));
               let revision = user.revision;
-              for (const record of writes) await client.query('INSERT INTO records VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at', [session.user_id, record.id, record.kind, JSON.stringify(record.data), 0, ++revision, new Date().toISOString()]);
+              for (const record of writes) await client.query('INSERT INTO records VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at', [session.user_id, record.id, record.kind, JSON.stringify(record.data), record.deleted ? 1 : 0, ++revision, new Date().toISOString()]);
               await client.query('UPDATE users SET revision=$1 WHERE id=$2', [revision, session.user_id]);
             }
             await client.query('INSERT INTO account_timers VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET state=excluded.state,version=excluded.version,last_saved_id=excluded.last_saved_id', [session.user_id, JSON.stringify(next.timer), next.version, next.lastSavedId]);

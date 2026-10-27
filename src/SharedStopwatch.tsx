@@ -1,3 +1,4 @@
+import { FocusDialog } from './FocusDialog';
 import { StopwatchDial } from './StopwatchDial';
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Platform, View } from 'react-native';
@@ -7,21 +8,23 @@ import { Button, C, Dialog, T, s } from './ui';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
 import { LogForm } from './forms';
+import { registerTimerCheckpoint } from './core/timerCheckpoint';
 import { elapsedMs, readTimer, timerClock, timerMinutes, type StudyTimer } from './core/stopwatch';
 import type { Mutation, Session } from './core/model';
 
-export interface SharedTimerState { version: number; timer: StudyTimer | null; lastSavedId: string | null; serverNow: number }
+export interface SharedTimerState { version: number; timer: StudyTimer | null; lastSavedId: string | null; serverNow: number; splitLogging?: boolean }
 interface TimerAccount { server: string; token: string; user: { id: string } }
 export function SharedStopwatch({ account, storageKey }: { account: TimerAccount; storageKey: string }) {
   const store = useStudy(), w = useWorkspace();
   const [state, setState] = useState<SharedTimerState | null>(null), [connected, setConnected] = useState(false), [busy, setBusy] = useState(false), [now, setNow] = useState(Date.now()), [offset, setOffset] = useState(0);
   const [logging, setLogging] = useState<SharedTimerState | null>(null), [discard, setDiscard] = useState(false), [focus, setFocus] = useState(false);
   const current = useRef<SharedTimerState | null>(null), clockOffset = useRef(0), alive = useRef(true), pending = useRef(0), queue = useRef(Promise.resolve()), writes = useRef(Promise.resolve()), lastSaved = useRef<string | null>(null);
+  useEffect(()=>registerTimerCheckpoint(storageKey,async()=>{await queue.current;await writes.current;}),[storageKey]);
   function apply(next: SharedTimerState, skew: number) {
     if (!alive.current || current.current && next.version < current.current.version) return;
     const previous = current.current;
     current.current = next; clockOffset.current = skew; setOffset(skew); setConnected(true);
-    if (!previous || previous.version !== next.version) setState(next);
+    if (!previous || previous.version !== next.version || previous.splitLogging !== next.splitLogging) setState(next);
     if (!previous || previous.version !== next.version) { writes.current = writes.current.catch(() => {}).then(() => AsyncStorage.setItem(storageKey + '.shared', JSON.stringify({ state: next, offset: skew }))); writes.current.catch(() => {}); }
     if (next.lastSavedId && lastSaved.current !== next.lastSavedId) { lastSaved.current = next.lastSavedId; void store.sync(); }
   }
@@ -85,8 +88,10 @@ export function SharedStopwatch({ account, storageKey }: { account: TimerAccount
     setBusy(true);
     try {
       await store.sync();
-      const entry = mutations.find(m => m.kind === 'session')!.data as Session, review = entry.activity === 'Revision' ? mutations.find(m => m.kind === 'topic')?.data as any : null;
-      await request({ action: 'log', version: logging.version, id: logging.timer.id, device: 'Web', entry, ...(review ? { review: { reviewOn: review.reviewOn } } : {}) });
+      const entries=mutations.filter(m=>m.kind==='session').map(m=>m.data as Session),entry=entries[0];
+      if(entries.length>1 && !current.current?.splitLogging)throw Error('Update the sync server before logging split study blocks. Your stopwatch is still kept.');
+      const reviews=mutations.filter(m=>m.kind==='topic'&&(m.data as any).lastReviewedOn===entry.date&&entries.some(e=>e.activity==='Revision'&&e.topicId===m.data.id)).map(m=>({topicId:m.data.id,reviewOn:(m.data as any).reviewOn}));
+      await request({action:'log',version:logging.version,id:logging.timer.id,device:'Web',entry,...(entries.length>1?{entries,totalMinutes:entries.reduce((n,e)=>n+e.minutes,0)}:{}),...(reviews.length?{reviews,...(entries.length===1?{review:{reviewOn:reviews[0].reviewOn}}:{})}:{})});
       await store.sync(); store.notify('Study time recorded across your devices.');
     } finally { if (alive.current) setBusy(false); }
   }
@@ -101,7 +106,7 @@ export function SharedStopwatch({ account, storageKey }: { account: TimerAccount
       </>}</View>
     </View>
     <Button small kind="ghost" label="Open focus dial" onPress={() => setFocus(true)} />
-    <Dialog open={focus} title="Make room for focus." onClose={() => setFocus(false)}><StopwatchDial elapsed={duration} running={!!timer && timer.startedAt !== null} label={!timer ? 'Ready when you are' : timer.startedAt === null ? 'Paused' : 'Studying'} /><View style={[s.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 12 }]}>{!timer ? <Button label="Start stopwatch" icon={Play} disabled={disabled} onPress={() => { void action('start'); }} /> : <><Button label={timer.startedAt === null ? 'Resume' : 'Pause'} icon={timer.startedAt === null ? Play : Pause} disabled={disabled} kind="secondary" onPress={() => { void action(timer.startedAt === null ? 'resume' : 'pause'); }} /><Button label="Finish & log" disabled={disabled} onPress={() => { void action('finish').then(next => { if (next) { setFocus(false); setLogging(next); } }); }} /></>}</View><T muted style={{ textAlign: 'center', fontSize: 10, marginTop: 20 }}>{connected ? 'One shared timer. Pause or resume from either device.' : 'Reconnecting. Your elapsed time is kept.'}</T></Dialog>
+    <FocusDialog open={focus} onClose={() => setFocus(false)}><StopwatchDial elapsed={duration} running={!!timer && timer.startedAt !== null} label={!timer ? 'Ready when you are' : timer.startedAt === null ? 'Paused' : 'Studying'} /><View style={[s.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 12 }]}>{!timer ? <Button label="Start stopwatch" icon={Play} disabled={disabled} onPress={() => { void action('start'); }} /> : <><Button label={timer.startedAt === null ? 'Resume' : 'Pause'} icon={timer.startedAt === null ? Play : Pause} disabled={disabled} kind="secondary" onPress={() => { void action(timer.startedAt === null ? 'resume' : 'pause'); }} /><Button label="Finish & log" disabled={disabled} onPress={() => { void action('finish').then(next => { if (next) { setFocus(false); setLogging(next); } }); }} /></>}</View><T muted style={{ textAlign: 'center', fontSize: 10, marginTop: 20 }}>{connected ? 'One shared timer. Pause or resume from either device.' : 'Reconnecting. Your elapsed time is kept.'}</T></FocusDialog>
     {!connected && state && <T muted style={{ fontSize: 10, marginTop: 6 }}>Reconnecting · showing the last known timer. Controls return when connected.</T>}
     {logging?.timer && (w.exams.length ? <LogForm key={logging.version} draft={{ id: logging.timer.id, minutes: timerMinutes(logging.timer, Date.now() + clockOffset.current), note: `Stopwatch · ${timerClock(elapsedMs(logging.timer, Date.now() + clockOffset.current))}` }} saveEntry={save} onClose={() => setLogging(null)} /> : <Dialog open title="Your shared time is kept" onClose={() => setLogging(null)}><T muted>Create an exam workspace, then choose Log time again.</T><Button label="Create exam workspace" onPress={() => { setLogging(null); w.openExam(); }} /></Dialog>)}
     <Dialog open={discard} title="Discard this shared timer?" onClose={() => setDiscard(false)}><T muted style={{ marginBottom: 20 }}>This removes the unsaved timer from all your devices. Saved study entries stay as they are.</T><Button label="Keep timer" kind="secondary" onPress={() => setDiscard(false)} /><Button label="Discard shared timer" kind="ghost" disabled={disabled} onPress={() => { void action('discard').then(next => { if (next) setDiscard(false); }); }} /></Dialog>

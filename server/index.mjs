@@ -78,7 +78,7 @@ export function createStudyServer(options = {}) {
                 const records = db.prepare('SELECT * FROM records WHERE user_id=?').all(session.user_id).map(unpack);
                 const writes = timerLogWrites(input, records);
                 let revision = db.prepare('SELECT revision FROM users WHERE id=?').get(session.user_id).revision;
-                for (const record of writes) db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data, deleted=excluded.deleted, version=excluded.version, changed_at=excluded.changed_at').run(session.user_id, record.id, record.kind, JSON.stringify(record.data), 0, ++revision, new Date().toISOString());
+                for (const record of writes) db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data, deleted=excluded.deleted, version=excluded.version, changed_at=excluded.changed_at').run(session.user_id, record.id, record.kind, JSON.stringify(record.data), record.deleted ? 1 : 0, ++revision, new Date().toISOString());
                 db.prepare('UPDATE users SET revision=? WHERE id=?').run(revision, session.user_id);
               }
               db.prepare('INSERT INTO account_timers VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET state=excluded.state,version=excluded.version,last_saved_id=excluded.last_saved_id').run(session.user_id, JSON.stringify(next.timer), next.version, next.lastSavedId);

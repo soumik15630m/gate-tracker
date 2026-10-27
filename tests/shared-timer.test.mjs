@@ -81,6 +81,42 @@ test('shared stopwatch: bidirectional control, isolation, races, atomic logging 
     assert.deepEqual(race.map(r => r.status).sort(), [200, 409]);
     assert.equal((await read(web)).body.timer, null);
   });
+  await t.test('split logging saves all allocations and lectures atomically with safe retries', async () => {
+    const topics=[
+      {id:'split-root-a',examId:'timer-exam',parentId:null,title:'Networks',lectureCount:3},
+      {id:'split-parent',examId:'timer-exam',parentId:'split-root-a',title:'Switching'},
+      {id:'split-deep',examId:'timer-exam',parentId:'split-parent',title:'Packet switching'},
+      {id:'split-second',examId:'timer-exam',parentId:'split-root-a',title:'Routing'},
+      {id:'split-root-b',examId:'timer-exam',parentId:null,title:'Mathematics',lectureCount:2}
+    ].map((topic,i)=>({...topic,order:i,confidence:'unrated',note:'',completedOn:null,reviewOn:null,focusOn:null}));
+    assert.equal((await sync(web,topics.map(data=>({id:data.id,kind:'topic',data,baseVersion:0,mutationId:'seed-'+data.id})))).status,200);
+    state=(await timer(web,{action:'start',version:(await read(web)).body.version,device:'Web'})).body;
+    state=(await timer(phone,{action:'finish',version:state.version,id:state.timer.id,device:'Android'})).body;
+    assert.equal(state.splitLogging,true);
+    const baseEntry={examId:'timer-exam',date:'2026-10-26',activity:'Revision',note:'Split study block',minutes:20};
+    const entries=[
+      {...baseEntry,id:state.timer.id,topicId:'split-deep',topicPath:'Networks / Switching / Packet switching',lectureSubjectId:'split-root-a',lectureIds:[1],practice:{correct:4,incorrect:1,skipped:2}},
+      {...baseEntry,id:'session_split_b',topicId:'split-root-b',topicPath:'Mathematics',lectureSubjectId:'split-root-b',lectureIds:[1]},
+      {...baseEntry,id:'session_split_a2',topicId:'split-second',topicPath:'Networks / Routing',lectureSubjectId:'split-root-a',lectureIds:[1]}
+    ];
+    const input={action:'log',version:state.version,id:state.timer.id,device:'Web',entries,totalMinutes:60,reviews:entries.map(e=>({topicId:e.topicId,reviewOn:'2026-11-05'}))};
+    assert.equal((await timer(web,{...input,totalMinutes:59})).status,400);
+    assert.equal((await timer(web,input)).status,409);
+    assert.equal((await read(phone)).body.version,state.version);
+    assert.equal((await sync(web)).body.records.filter(r=>entries.some(e=>e.id===r.id)).length,0);
+    entries[2].lectureIds=[2];
+    const saved=await timer(phone,{...input,device:'Android'});assert.equal(saved.status,200);assert.equal(saved.body.timer,null);
+    const retry=await timer(web,input);assert.equal(retry.status,200);assert.equal(retry.body.version,saved.body.version);
+    const records=(await sync(web)).body.records,logs=records.filter(r=>entries.some(e=>e.id===r.id));
+    assert.equal(logs.length,3);assert.equal(logs.reduce((sum,r)=>sum+r.data.minutes,0),60);
+    assert.ok(logs.every(r=>r.data.groupId===entries[0].id));
+    assert.deepEqual(records.find(r=>r.id==='split-deep').data.lectureIds,[1]);
+    assert.deepEqual(records.find(r=>r.id==='split-second').data.lectureIds,[2]);
+    assert.deepEqual(records.find(r=>r.id==='split-root-b').data.lectureIds,[1]);
+    assert.equal(records.find(r=>r.id==='split-deep').data.reviewOn,'2026-11-05');
+    assert.equal(logs.find(r=>r.id===entries[0].id).data.practice.correct,4);
+    assert.equal((await sync(other)).body.records.filter(r=>entries.some(e=>e.id===r.id)).length,0);
+  });
   await t.test('the previous local timer migrates once without resetting its accumulated time', async () => {
     const legacy = { id: 'session_legacy', accumulatedMs: 90000, startedAt: null };
     const imported = await timer(other, { action: 'import', version: 0, device: 'Android', timer: legacy });

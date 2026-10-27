@@ -3,11 +3,13 @@ import { View } from 'react-native';
 import { Plus, Trash2 } from 'lucide-react-native';
 import { Button, C, DateField, Dialog, IconButton, Input, Select, T, s } from './ui';
 import { LogSyllabusCreator, LogLecturePicker } from './LogSyllabus';
+import { SplitRows, type SplitRow } from './SplitRows';
+import { validateSplit } from './core/split';
 import { availableLectures } from './core/lectures';
 import { TopicAutocomplete } from './TopicAutocomplete';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
-import { activities, addDays, children, dateKey, list, mistakeCategories, topicPath, uid, validDate, type Activity, type Exam, type Mistake, type Mock, type MockSection, type Mutation, type Session, type Topic } from './core/model';
+import { activities, addDays, children, dateKey, list, mistakeCategories, subjectFor, topicPath, uid, validDate, type Activity, type Exam, type Mistake, type Mock, type MockSection, type Mutation, type Session, type Topic } from './core/model';
 function ErrorText({ error }: { error: string }) { return error ? <T style={{ color: C.red, marginBottom: 16, lineHeight: 21 }}>{error}</T> : null; }
 export function ExamForm({ initial, onClose }: { initial?: Exam; onClose: () => void }) {
   const { commit } = useStudy(), { today, setExamId } = useWorkspace();
@@ -28,31 +30,50 @@ export function LogForm({ initial, topicId, initialActivity, draft, onSaved, sav
   const lectureInfo = availableLectures(topics, list<Session>(data.records, 'session'), selected, initial?.id);
   const preservedLectures = initial?.topicId === selected && initial?.examId === examId ? initial.lectureIds || [] : [];
   const [questions,setQuestions] = useState(!!initial?.practice), [correct,setCorrect] = useState(String(initial?.practice?.correct || 0)), [incorrect,setIncorrect] = useState(String(initial?.practice?.incorrect || 0)), [skipped,setSkipped] = useState(String(initial?.practice?.skipped || 0));
+  const [parts,setParts]=useState<SplitRow[]>([]),[firstMinutes,setFirstMinutes]=useState('');
+  const blockMinutes=Number(hours)*60+Number(minutes);
+  const primaryUsed=new Set(lectureInfo.used);for(const part of parts)if(subjectFor(allTopics,part.topicId)?.id===lectureInfo.subject?.id)part.lectureIds.forEach(n=>primaryUsed.add(n));
   const [saving, setSaving] = useState(false);
   async function save() { if (saving) return; setSaving(true); try {
     const practice = questions ? {correct:Number(correct),incorrect:Number(incorrect),skipped:Number(skipped)} : null;
     if (practice && (!Object.values(practice).every(n=>Number.isInteger(n)&&n>=0) || practice.correct+practice.incorrect+practice.skipped>1000000)) throw Error('Use whole, non-negative question counts up to 1,000,000 in total.');
     const total = Number(hours) * 60 + Number(minutes); if (!examId || !Number.isInteger(total) || total < 1 || total > 1440 || Number(minutes) < 0 || Number(minutes) > 59 || Number(hours) < 0 || !validDate(date) || date > today) throw new Error('Choose an exam, a study date up to today, and a duration of 1 minute to 24 hours.');
     if (lectureIds.some(n => lectureInfo.used.has(n) || n > (lectureInfo.subject?.lectureCount || 10000))) throw new Error('Some lectures are already credited or exceed the subject total. Refresh your selection.');
-    const session: Session = { practice, id: initial?.id || draft?.id || uid('session'), examId, topicId: selected || null, topicPath: topicPath(topics, selected) || 'Whole exam', date, minutes: total, activity, note, ...(initial?.mockId ? { mockId: initial.mockId } : {}), lectureIds: [...new Set([...preservedLectures, ...lectureIds])], lectureSubjectId: lectureInfo.subject?.id || initial?.lectureSubjectId || null };
+    const allocations=parts.length?[Number(firstMinutes),...parts.map(p=>Number(p.minutes))]:[total];validateSplit(total,allocations);
+    const session: Session = { ...initial, practice, id: initial?.id || draft?.id || uid('session'), examId, topicId: selected || null, topicPath: topicPath(topics, selected) || 'Whole exam', date, minutes: allocations[0], activity, note, ...(initial?.mockId ? { mockId: initial.mockId } : {}), lectureIds: [...new Set([...preservedLectures, ...lectureIds])], lectureSubjectId: lectureInfo.subject?.id || initial?.lectureSubjectId || null };
     const mutations: Mutation[] = [{ kind: 'session', data: session }];
     const topic = topics.find(t => t.id === selected);
     if (lectureIds.length && topic) mutations.push({ kind: 'topic', data: { ...topic, lectureIds: [...new Set([...(topic.lectureIds || []), ...lectureIds])].sort((a,b) => a-b) } });
     if (activity === 'Revision' && topic) { if (reviewOn && !validDate(reviewOn)) throw new Error('Choose a valid next review date.'); const existing = mutations.find(m => m.kind === 'topic' && m.data.id === topic.id); if (existing) existing.data = { ...existing.data as Topic, lastReviewedOn: date, reviewOn }; else mutations.push({ kind: 'topic', data: { ...topic, lastReviewedOn: date, reviewOn } }); }
+    if(parts.length) {
+      session.groupId=initial?.groupId || session.id;
+      for(const [i,part] of parts.entries()) {
+        const selectedTopic=topics.find(t=>t.id===part.topicId);if(!selectedTopic)throw Error(`Choose a subject or subtopic for entry ${i+2}.`);
+        const subject=subjectFor(topics,part.topicId)!;
+        const entry:Session={id:part.id,examId,topicId:part.topicId,topicPath:topicPath(topics,part.topicId),date,minutes:allocations[i+1],activity,note:part.note||note,groupId:session.groupId,lectureIds:part.lectureIds,lectureSubjectId:subject.id,practice:part.questions?{correct:Number(part.correct),incorrect:Number(part.incorrect),skipped:Number(part.skipped)}:null};
+        mutations.push({kind:'session',data:entry});
+        const previous=mutations.find(m=>m.kind==='topic'&&m.data.id===selectedTopic.id),latest=previous?.data as Topic || selectedTopic;
+        if(part.lectureIds.length || activity==='Revision') {
+          const updated:Topic={...latest,...(part.lectureIds.length?{lectureIds:[...new Set([...(latest.lectureIds||[]),...part.lectureIds])].sort((a,b)=>a-b)}:{}),...(activity==='Revision'?{lastReviewedOn:date,reviewOn}:{})};
+          if(previous)previous.data=updated;else mutations.push({kind:'topic',data:updated});
+        }
+      }
+    }
     if (initial?.mockId) { const mock = list<Mock>(data.records, 'mock').find(m => m.id === initial.mockId); if (mock) mutations.push({ kind: 'mock', data: { ...mock, minutes: total, date, examId } }); }
     if (saveEntry) await saveEntry(mutations); else commit(mutations, initial ? 'Study entry updated.' : 'Study time recorded. A little further.'); await onSaved?.(); onClose();
   } catch (e) { setError((e as Error).message); } finally { setSaving(false); } }
   return <Dialog open onClose={onClose} title={initial ? 'Edit study entry' : 'Make your effort count'}>
     {draft && <T muted style={{ marginBottom: 16 }}>Your stopwatch is paused. Time is rounded to whole minutes; adjust it if needed. Closing keeps your unsaved timer.</T>}
-    <Select label="Exam workspace" value={examId} options={exams.map(e => ({ value: e.id, label: e.name }))} onChange={id => { setExamId(id); setSelected(''); }} />
+    <Select label="Exam workspace" value={examId} options={exams.map(e => ({ value: e.id, label: e.name }))} onChange={id => { setExamId(id); setSelected('');setParts([]);setFirstMinutes(''); }} />
     <TopicAutocomplete topics={topics} value={selected} onChange={setSelected} autoFocus={!initial} label="Quick find any topic" />
     <Select label="Subject" value={lineage[0]?.id || ''} options={[{ value: '', label: 'Whole exam · no specific subject' }, ...roots.map(t => ({ value: t.id, label: t.title }))]} onChange={setSelected} />
     {lineage.map((parent, index) => { const options = children(topics, parent.id); return options.length ? <Select key={parent.id} label={`Inside ${parent.title}`} value={lineage[index + 1]?.id || ''} options={[{ value: '', label: `All of ${parent.title}` }, ...options.map(t => ({ value: t.id, label: t.title }))]} onChange={id => setSelected(id || parent.id)} /> : null; })}
     {selected && <T muted style={{ fontSize: 11, marginBottom: 18, lineHeight: 19 }}>{topicPath(topics, selected)}</T>}
     <LogSyllabusCreator key={examId} examId={examId} topics={topics} selected={selected} onSelect={setSelected} />
     {preservedLectures.length > 0 && <T muted style={{ marginBottom: 12 }}>{preservedLectures.length} lectures already attributed to this entry.</T>}
-    <LogLecturePicker key={selected} subject={lectureInfo.subject} used={lectureInfo.used} value={lectureIds} onChange={ids => setLectureDraft({ topic: selected, ids })} /><View style={{marginBottom:18,gap:12}}><Button small kind="secondary" label={questions ? 'Remove question practice' : '+ Record question practice'} onPress={()=>setQuestions(!questions)} />{questions&&<><T muted>Attempted = correct + incorrect. Skipped questions are tracked separately.</T><Input numeric label="Correct answers" value={correct} onChange={setCorrect}/><Input numeric label="Incorrect answers" value={incorrect} onChange={setIncorrect}/><Input numeric label="Skipped questions" value={skipped} onChange={setSkipped}/></>}</View>
+    <LogLecturePicker key={selected} subject={lectureInfo.subject} used={primaryUsed} value={lectureIds} onChange={ids => setLectureDraft({ topic: selected, ids })} /><View style={{marginBottom:18,gap:12}}><Button small kind="secondary" label={questions ? 'Remove question practice' : '+ Record question practice'} onPress={()=>setQuestions(!questions)} />{questions&&<><T muted>Attempted = correct + incorrect. Skipped questions are tracked separately.</T><Input numeric label="Correct answers" value={correct} onChange={setCorrect}/><Input numeric label="Incorrect answers" value={incorrect} onChange={setIncorrect}/><Input numeric label="Skipped questions" value={skipped} onChange={setSkipped}/></>}</View>
     <View style={s.columns}><View style={{ flex: 1 }}><Input label="Hours" value={hours} onChange={setHours} numeric /></View><View style={{ flex: 1 }}><Input label="Minutes" value={minutes} onChange={setMinutes} numeric /></View></View>
+    {!initial?.mockId && <SplitRows examId={examId} topics={topics} sessions={list<Session>(data.records,'session')} selected={selected} primaryLectures={lectureIds} total={blockMinutes} firstMinutes={firstMinutes} onFirstMinutes={setFirstMinutes} rows={parts} onChange={setParts}/>}
     <DateField label="Study date" value={date} max={today} onChange={setDate} /><Select label="Activity" value={activity} options={activities.map(value => ({ value, label: value }))} onChange={value => setActivity(value as Activity)} />
     {activity === 'Revision' && selected && <DateField label="Next review · optional" value={reviewOn} onChange={setReviewOn} optional />}
     <Input label="A note · optional" value={note} onChange={setNote} multiline placeholder="What clicked? What needs another look?" /><ErrorText error={error} /><Button label={saving ? 'Saving...' : initial ? 'Save changes' : 'Save study entry'} disabled={saving} onPress={save} />

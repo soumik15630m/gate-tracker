@@ -3,6 +3,7 @@ import { Platform, View } from 'react-native';
 import { Download, RefreshCw } from 'lucide-react-native';
 import { useStudy } from './store';
 import { hasNewWebRelease } from './core/releases';
+import { checkpointTimers } from './core/timerCheckpoint';
 import { Button, Panel, T, s } from './ui';
 interface UpdateState { enabled:boolean; checking:boolean; pending:boolean; error:string; checkedAt:string; check:()=>Promise<void>; apply:()=>Promise<void> }
 const Context=createContext<UpdateState|null>(null);
@@ -31,8 +32,9 @@ export function UpdateProvider({children}:{children:ReactNode}) {
     if(!enabled)return;
     if(document.querySelector('[data-testid="study-dialog"]')) { study.notify('Finish or close your open form before updating. Your saved progress is safe.'); return; }
     if(!navigator.onLine){study.notify('Reconnect to download the update. Your study data stays on this device.');return;}
-    try{await study.flush();}catch{study.notify('Could not save your latest changes. Export a backup before updating.');return;}
+    try{await study.flush();await checkpointTimers();}catch{study.notify('Could not save your stopwatch or latest changes. Keep this page open and try again.');return;}
     if('serviceWorker' in navigator) await navigator.serviceWorker.getRegistration().then(r=>r?.update()).catch(()=>{});
+    try{await checkpointTimers();await study.flush();}catch{study.notify('Your stopwatch could not be saved. The update has been postponed.');return;}
     location.reload();
   },[enabled,study.flush,study.notify]);
   return <Context.Provider value={{enabled,checking,pending,error,checkedAt,check,apply}}>{children}</Context.Provider>;

@@ -5,7 +5,7 @@ import { buildSchedule } from '../shared/planner.mjs';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export const emptyTimerState = () => ({ version: 0, timer: null, lastSavedId: null });
 export const unpackTimer = row => row ? { version: row.version, timer: JSON.parse(row.state), lastSavedId: row.last_saved_id } : emptyTimerState();
-export const timerReply = state => ({ ...state, serverNow: Date.now() });
+export const timerReply = state => ({ ...state, serverNow: Date.now(), splitLogging: true });
 
 // Called while holding the same per-user write lock as ordinary study sync.
 export function transitionTimer(input, current, now = Date.now()) {
@@ -29,7 +29,8 @@ export function transitionTimer(input, current, now = Date.now()) {
     if (input.action === 'discard') timer = null;
     else if (input.action === 'log') {
       if (!timer.finished || timer.startedAt !== null) throw fail(409, 'Finish the timer again before logging its time.');
-      if (!validateEntity('session', input.entry) || input.entry.id !== timer.id || input.entry.mockId != null) throw fail(400, 'Choose an exam, topic and a valid study duration.');
+      const entries=timerEntries(input);
+      if(entries[0].id!==timer.id) throw fail(400,'Choose a valid stopwatch entry.');
       timer = null;
     } else if (input.action === 'resume') timer = { ...timer, startedAt: timer.startedAt ?? now, finished: false, updatedBy: input.device };
     else timer = { ...timer, accumulatedMs, startedAt: null, finished: input.action === 'finish', updatedBy: input.device };
@@ -37,35 +38,43 @@ export function transitionTimer(input, current, now = Date.now()) {
   return { version: current.version + 1, timer, lastSavedId: input.action === 'log' ? input.id : current.lastSavedId };
 }
 
+export function timerEntries(input) {
+  const entries=input.entries===undefined ? [input.entry] : input.entries;
+  if(!Array.isArray(entries)||!entries.length||entries.length>20||entries.some(e=>!validateEntity('session',e)||e.mockId!=null)||new Set(entries.map(e=>e.id)).size!==entries.length) throw fail(400,'Choose up to 20 valid study entries with unique IDs.');
+  const total=entries.reduce((n,e)=>n+e.minutes,0);
+  if(total>1440 || entries.some(e=>e.examId!==entries[0].examId || e.date!==entries[0].date) || (input.entries!==undefined && (!Number.isInteger(input.totalMinutes)||input.totalMinutes!==total))) throw fail(400,'Split minutes must add up exactly to one study block, on the same date and in the same workspace.');
+  return entries;
+}
 export function timerLogWrites(input, records) {
-  const byId = new Map(records.map(record => [record.id, record]));
-  if (byId.has(input.entry.id)) throw fail(409, 'This stopwatch already has a study entry. Refresh your study log.');
-  const writes = [{ id: input.entry.id, kind: 'session', data: input.entry, deleted: false }];
-  if (input.entry.lectureIds?.length) {
-    const topic = byId.get(input.entry.topicId), subject = byId.get(input.entry.lectureSubjectId);
-    if (!topic || topic.deleted || topic.kind !== 'topic' || !subject || subject.deleted || subject.kind !== 'topic' || subject.data.parentId !== null || subject.data.examId !== input.entry.examId) throw fail(400, 'Select a valid subject or topic for completed lectures.');
-    let ancestor = topic; const seen = new Set();
-    while (ancestor && ancestor.data.parentId && !seen.has(ancestor.id)) { seen.add(ancestor.id); ancestor = byId.get(ancestor.data.parentId); }
-    if (ancestor?.id !== subject.id) throw fail(400, 'The selected lectures belong to a different subject.');
-    const previous = new Set(input.entry.lectureIds);
-    const existingCredit = records.filter(r => !r.deleted && r.kind === 'topic').some(r => (r.data.lectureIds || []).some(n => previous.has(n)) && (() => { let a = r; const visited = new Set(); while (a?.data.parentId && !visited.has(a.id)) { visited.add(a.id); a = byId.get(a.data.parentId); } return a?.id === subject.id; })());
-    if (existingCredit) throw fail(409, 'Some lectures were already completed. Refresh and choose remaining lectures.');
-    const updated = { ...topic, data: { ...topic.data, lectureIds: [...new Set([...(topic.data.lectureIds || []), ...input.entry.lectureIds])].sort((a,b) => a-b) } };
-    writes.push(updated); byId.set(updated.id, updated);
+  const entries=timerEntries(input),byId=new Map(records.map(r=>[r.id,r])),writes=new Map();
+  const put=record=>{writes.set(record.id,record);byId.set(record.id,record);};
+  const rootFor=record=>{let node=record;const seen=new Set();while(node?.data.parentId&&!seen.has(node.id)){seen.add(node.id);node=byId.get(node.data.parentId);}return node;};
+  for(const original of entries) {
+    const entry=entries.length>1 ? {...original,groupId:entries[0].id} : original;
+    if(byId.has(entry.id)) throw fail(409,'This stopwatch or split entry already has a study log. Refresh your study log.');
+    put({id:entry.id,kind:'session',data:entry,deleted:false});
+    if(entry.lectureIds?.length) {
+      const topic=byId.get(entry.topicId),subject=byId.get(entry.lectureSubjectId);
+      if(!topic||topic.deleted||topic.kind!=='topic'||!subject||subject.deleted||subject.kind!=='topic'||subject.data.parentId!==null||subject.data.examId!==entry.examId) throw fail(400,'Select a valid subject or topic for completed lectures.');
+      if(rootFor(topic)?.id!==subject.id) throw fail(400,'The selected lectures belong to a different subject.');
+      const selected=new Set(entry.lectureIds);
+      if([...byId.values()].some(r=>!r.deleted&&r.kind==='topic'&&(r.data.lectureIds||[]).some(n=>selected.has(n))&&rootFor(r)?.id===subject.id)) throw fail(409,'Some lectures were already completed. Choose remaining lectures.');
+      put({...topic,data:{...topic.data,lectureIds:[...new Set([...(topic.data.lectureIds||[]),...entry.lectureIds])].sort((a,b)=>a-b)}});
+    }
   }
-  if (input.review != null) {
-    const topic = byId.get(input.entry.topicId);
-    if (input.entry.activity !== 'Revision' || !topic || topic.deleted || topic.kind !== 'topic') throw fail(400, 'Choose a valid revision topic.');
-    const data = { ...topic.data, lastReviewedOn: input.entry.date, reviewOn: input.review.reviewOn };
-    if (!validateEntity('topic', data)) throw fail(400, 'Choose a valid next review date.');
-    const previousIndex = writes.findIndex(w => w.id === topic.id); if (previousIndex >= 0) writes.splice(previousIndex, 1);
-    writes.push({ id: topic.id, kind: 'topic', data, deleted: false });
+  const reviews=input.reviews===undefined ? input.review==null ? [] : [{topicId:entries[0].topicId,reviewOn:input.review.reviewOn}] : input.reviews;
+  if(!Array.isArray(reviews)||reviews.length>20) throw fail(400,'Choose valid next revision dates.');
+  for(const review of reviews) {
+    const entry=entries.find(e=>e.activity==='Revision'&&e.topicId===review?.topicId),topic=byId.get(review?.topicId);
+    if(!entry||!topic||topic.deleted||topic.kind!=='topic') throw fail(400,'Choose a valid revision topic.');
+    const data={...topic.data,lastReviewedOn:entry.date,reviewOn:review.reviewOn};
+    if(!validateEntity('topic',data)) throw fail(400,'Choose a valid next review date.');
+    put({...topic,data});
   }
-  for (const write of writes) byId.set(write.id, write);
-  const timezone = [...byId.values()].find(r => !r.deleted && r.kind === 'preferences')?.data.timezone || 'UTC';
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
-  for (const change of buildSchedule([...byId.values()],today).writes) { const write = { ...change, id:change.data.id, deleted:!!change.deleted }; writes.push(write); byId.set(write.id,write); }
-  if ([...byId.values()].filter(record => !record.deleted).length > 20000) throw fail(400, 'A workspace supports up to 20,000 records.');
-  try { validateRelationships([...byId.values()]); } catch (error) { throw fail(400, error.message); }
-  return writes;
+  const timezone=[...byId.values()].find(r=>!r.deleted&&r.kind==='preferences')?.data.timezone||'UTC';
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  for(const change of buildSchedule([...byId.values()],today).writes) put({...change,id:change.data.id,deleted:!!change.deleted});
+  if([...byId.values()].filter(r=>!r.deleted).length>20000) throw fail(400,'A workspace supports up to 20,000 records.');
+  try{validateRelationships([...byId.values()]);}catch(error){throw fail(400,error.message);}
+  return [...writes.values()];
 }

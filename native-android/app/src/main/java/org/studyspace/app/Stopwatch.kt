@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -20,15 +22,17 @@ import kotlinx.serialization.encodeToString
 
 class NativeStopwatch(context: Context, workspace: StateFlow<String>, coroutineScope: CoroutineScope) {
     private val preferences = context.getSharedPreferences("study_stopwatch_v1", Context.MODE_PRIVATE)
+    private val persistence=Any()
     private var scope = workspace.value
     private val _timer = MutableStateFlow<StudyTimer?>(null)
     val timer = _timer.asStateFlow()
     init { coroutineScope.launch { workspace.collect { key ->
-        scope = key
+        synchronized(persistence) { scope = key
         _timer.value = runCatching { preferences.getString(key, null)?.let { codec.decodeFromString<StudyTimer>(it) } }
             .getOrNull()?.takeIf { it.accumulatedMs >= 0 && (it.startedAt == null || it.startedAt >= 0) }
+        }
     } } }
-    private fun update(value: StudyTimer?) {
+    private fun update(value: StudyTimer?) = synchronized(persistence) {
         _timer.value = value
         preferences.edit().apply { if (value == null) remove(scope) else putString(scope, codec.encodeToString(value)) }.apply()
     }
@@ -37,6 +41,10 @@ class NativeStopwatch(context: Context, workspace: StateFlow<String>, coroutineS
     fun finish(): StudyTimer? = _timer.value?.pause()?.also { update(it) }
     fun consume(id: String, workspace: String) { if (workspace == scope && _timer.value?.id == id) update(null) }
     fun discard() = update(null)
+    suspend fun checkpoint() = withContext(Dispatchers.IO) { synchronized(persistence) {
+        val key=scope;val current=_timer.value
+        check(preferences.edit().apply { if(current==null)remove(key) else putString(key,codec.encodeToString(current)) }.commit()) { "Could not save the stopwatch. The update has been postponed." }
+    } }
 }
 
 // Only this small composable ticks; the surrounding syllabus list stays idle.

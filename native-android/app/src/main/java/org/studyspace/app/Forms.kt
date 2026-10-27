@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -112,7 +113,7 @@ import kotlinx.coroutines.withContext
     var nodes by remember { mutableStateOf<List<VisibleTopic>>(emptyList()) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Body(label)
-        Row(Modifier.fillMaxWidth().background(Palette.raised, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable { open = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().testTag("Topic selector $label").background(Palette.raised, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable { open = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(index.byId[selected]?.title ?: if (selected != null) "Loading selected topic…" else rootLabel, fontFamily = Sans, fontSize = 14.sp, color = Palette.text, modifier = Modifier.weight(1f))
             Icon(Icons.Outlined.ExpandMore, null, tint = Palette.muted, modifier = Modifier.size(18.dp))
         }
@@ -194,55 +195,57 @@ import kotlinx.coroutines.withContext
     var correct by rememberSaveable { mutableStateOf((original?.practice?.correct ?: 0).toString()) }
     var incorrect by rememberSaveable { mutableStateOf((original?.practice?.incorrect ?: 0).toString()) }
     var skipped by rememberSaveable { mutableStateOf((original?.practice?.skipped ?: 0).toString()) }
+    var splitJson by rememberSaveable { mutableStateOf("[]") }
+    val parts=remember(splitJson) { codec.decodeFromString<List<SplitDraft>>(splitJson) }
+    var firstMinutes by rememberSaveable { mutableStateOf("") }
+    val blockMinutes=(hours.toIntOrNull() ?: 0)*60+(minutes.toIntOrNull() ?: 0)
     val id = rememberSaveable { original?.id ?: editor.timer?.id ?: uid("session") }
     val index = rememberExamIndex(w, exam)
     var lectureIds by rememberSaveable(topic) { mutableStateOf(emptySet<Int>()) }
     val subject = index.subjects[topic]
     val used by produceState(emptySet<Int>(), index, subject, w.state.sessions) { value = withContext(Dispatchers.Default) { if (subject == null) emptySet() else index.content(subject.id).lectures + w.state.sessions.filter { it.lectureSubjectId == subject.id && it.id != original?.id }.flatMap { it.lectureIds } } }
+    val primaryUsed=used+parts.filter { index.subjects[it.topicId]?.id==subject?.id }.flatMap { it.lectureIds }
     val preservedLectures = if (original?.topicId == topic && original?.examId == exam) original.lectureIds else emptyList()
     EditorFrame("Time, well spent.", vm, onSave = {
         vm.perform {
             require(editor.timer == null || vm.repo.workspace.value == editor.timerScope) { "Return to the account where this stopwatch was started." }
             val h = hours.toIntOrNull() ?: error("Enter whole hours."); val m = minutes.toIntOrNull() ?: error("Enter whole minutes.")
             require(h >= 0 && m in 0..59 && h * 60 + m in 1..1440) { "Log between 1 minute and 24 hours, with minutes from 0 to 59." }
-            val path = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == exam }).path(topic).takeLast(10000) }
+            val allocations=if(parts.isEmpty())listOf(h*60+m) else listOf(firstMinutes.toIntOrNull() ?: 0)+parts.map { it.minutes.toIntOrNull() ?: 0 }
+            validateSplitMinutes(h*60+m,allocations)
+            val path = withContext(Dispatchers.Default) { index.path(topic).takeLast(10000) }
             require(lectureIds.all { it !in used && it <= (subject?.lectureCount?.takeIf { it>0 } ?: 10000) }) { "Some lectures were already credited. Refresh your selection." }
-            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId, (preservedLectures + lectureIds).distinct().sorted(), subject?.id ?: original?.lectureSubjectId,if (questions) Practice(correct.toIntOrNull() ?: error("Enter a whole correct-answer count."),incorrect.toIntOrNull() ?: error("Enter a whole incorrect-answer count."),skipped.toIntOrNull() ?: error("Enter a whole skipped count.")) else null)
+            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, allocations[0], activity, note.trim(), original?.mockId, (preservedLectures + lectureIds).distinct().sorted(), subject?.id ?: original?.lectureSubjectId,if (questions) Practice(correct.toIntOrNull() ?: error("Enter a whole correct-answer count."),incorrect.toIntOrNull() ?: error("Enter a whole incorrect-answer count."),skipped.toIntOrNull() ?: error("Enter a whole skipped count.")) else null, original?.groupId ?: if(parts.isNotEmpty())id else null)
+            val entries=listOf(entry)+parts.mapIndexed { i,part ->
+                val selected=part.topicId?.let { index.byId[it] } ?: error("Choose a subject or subtopic for entry ${i+2}.")
+                StudySession(part.id,exam,selected.id,index.path(selected.id).takeLast(10000),date,allocations[i+1],activity,part.note.ifBlank { note.trim() },lectureIds=part.lectureIds.sorted(),lectureSubjectId=index.subjects[selected.id]?.id,practice=if(part.questions)Practice(part.correct.toIntOrNull() ?: error("Enter a whole correct-answer count."),part.incorrect.toIntOrNull() ?: error("Enter a whole incorrect-answer count."),part.skipped.toIntOrNull() ?: error("Enter a whole skipped count."))else null,groupId=entry.groupId)
+            }
+            entries.forEach { validate("session",jsonOf(it)) }
             if (editor.timerVersion != null) {
                 vm.repo.sync()
-                vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry,if(activity=="Revision" && topic!=null) nextReview else null)
+                vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry,if(activity=="Revision") nextReview else null,entries.takeIf { it.size>1 },h*60+m)
                 vm.repo.sync()
                 vm.repo.messages.emit("Study time recorded across your devices")
             } else {
                 vm.repo.edit("Study time logged", expectedScope = editor.timerScope) { state ->
-                    val changes = mutableListOf(mutation("session", entry))
-                    if (lectureIds.isNotEmpty()) {
-                        val tree = TopicIndex(state.topics); val latest = tree.byId[topic] ?: error("The selected topic was removed.")
-                        val root = tree.subjects[latest.id] ?: error("Choose a subject.")
-                        require(lectureIds.none { it in tree.content(root.id).lectures }) { "Some lectures were already completed. Choose remaining lectures." }
-                        changes.add(mutation("topic", latest.copy(lectureIds = (latest.lectureIds + lectureIds).distinct().sorted())))
-                    }
-                    if(activity=="Revision" && topic!=null) {
-                        val current=changes.firstOrNull { it.kind=="topic" && it.id==topic }?.data?.asModel<Topic>() ?: state.topics.firstOrNull { it.id==topic }
-                        if(current!=null) { changes.removeAll { it.kind=="topic" && it.id==topic }; changes.add(mutation("topic",current.copy(lastReviewedOn=date,reviewOn=nextReview))) }
-                    }
-                    changes
+                    splitSessionChanges(state,entries,mapOf(entry.id to lectureIds)+parts.associate { it.id to it.lectureIds },if(activity=="Revision")nextReview else null)
                 }
                 editor.timer?.let { vm.stopwatch.consume(it.id, editor.timerScope.orEmpty()) }
             }
         }
     }, onDelete = original?.let { { vm.open(Editor.Delete("session", id)) } }) {
         if (editor.timer != null) Body("Your stopwatch is paused. Time is rounded to whole minutes; adjust it if needed. Closing keeps your unsaved timer. Create an exam workspace first if you do not have one yet.")
-        ExamChoice(w, exam) { exam = it; topic = null }
+        ExamChoice(w, exam) { exam = it; topic = null; splitJson="[]"; firstMinutes="" }
         TopicSelector("Subject or any syllabus level", index, topic, { topic = it })
         LogTopicPath(index, topic) { topic = it }
         LogSyllabusCreator(w, vm, exam, topic) { topic = it }
         if (preservedLectures.isNotEmpty()) Body("${preservedLectures.size} lectures already attributed to this entry.")
-        LogLecturePicker(subject, used, lectureIds) { lectureIds = it }
+        LogLecturePicker(subject, primaryUsed, lectureIds) { lectureIds = it }
         ToggleLine("Record question practice",questions,{questions=it})
         if (questions) { Body("Attempted = correct + incorrect. Skipped questions stay separate."); Field("Correct answers",correct,{correct=it},numeric=true); Field("Incorrect answers",incorrect,{incorrect=it},numeric=true); Field("Skipped questions",skipped,{skipped=it},numeric=true) }
         DateField("Study date", date, { date = it })
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Hours", hours, { hours = it }, Modifier.weight(1f), numeric = true); Field("Minutes", minutes, { minutes = it }, Modifier.weight(1f), numeric = true) }
+        if(original?.mockId==null) SplitSessionRows(w,vm,exam,index,topic,lectureIds,blockMinutes,firstMinutes,{firstMinutes=it},parts,{splitJson=codec.encodeToString(it)})
         Choice("Activity", activity, activityLabels.map { it to it }) { activity = it }
         if(activity=="Revision" && topic!=null) DateField("Next revision",nextReview,{nextReview=it})
         Field("A note about this session", note, { note = it }, multiline = true, hint = "What did you work through?")

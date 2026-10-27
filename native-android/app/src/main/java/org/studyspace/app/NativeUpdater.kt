@@ -76,23 +76,33 @@ class NativeUpdater(private val context: Context) {
             state.value = state.value.copy(progress = null, verifiedApk = verified, message = "Checksum and signing certificate verified. Install when you’re ready.")
         } catch (error: Exception) { partial.delete(); state.value = state.value.copy(progress = null, verifiedApk = null, message = error.message ?: "The update could not be downloaded.") }
     }
-    fun install() {
-        val file = state.value.verifiedApk ?: return
-        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            awaitingInstall=true
-            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            state.value = state.value.copy(message = "Allow Study Tracker to request installation, then return and tap Install verified update.")
-            return
-        }
-        awaitingInstall=false
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    suspend fun install(): Boolean {
+        val file=state.value.verifiedApk ?: return false
+        return try {
+            val app=context.applicationContext as StudyspaceApplication
+            app.repository.readCurrent()
+            app.stopwatch.checkpoint()
+            app.repository.account.value?.let { app.sharedStopwatch.connect(it);app.sharedStopwatch.checkpoint() }
+            withContext(Dispatchers.Main) {
+                if(Build.VERSION.SDK_INT>=26 && !context.packageManager.canRequestPackageInstalls()) {
+                    awaitingInstall=true
+                    context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    state.value=state.value.copy(message="Allow Study Tracker to request installation, then return. Your stopwatch keeps its running or paused state.")
+                } else {
+                    awaitingInstall=false
+                    val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",file)
+                    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                }
+                true
+            }
+        } catch(cancelled:kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch(error:Exception) { state.value=state.value.copy(message=error.message ?: "Could not save the stopwatch. The update has been postponed.");false }
     }
-    suspend fun updateNow() {
+    suspend fun updateNow(): Boolean {
         if(state.value.verifiedApk==null) download()
-        if(state.value.verifiedApk!=null) withContext(Dispatchers.Main) { install() }
+        return if(state.value.verifiedApk!=null) install() else false
     }
-    fun resumeInstallation() {
+    suspend fun resumeInstallation() {
         if(awaitingInstall && state.value.verifiedApk?.exists()==true && (Build.VERSION.SDK_INT<26 || context.packageManager.canRequestPackageInstalls())) install()
     }
     private fun readHttps(address: String): String {
