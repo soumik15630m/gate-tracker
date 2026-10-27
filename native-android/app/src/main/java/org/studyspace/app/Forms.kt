@@ -85,12 +85,14 @@ import kotlinx.coroutines.withContext
     var date by rememberSaveable { mutableStateOf(original?.date ?: addDays(today(), 106)) }
     var target by rememberSaveable { mutableStateOf(original?.weeklyTarget?.let(::formatScore) ?: "20") }
     var description by rememberSaveable { mutableStateOf(original?.description.orEmpty()) }
+    var goalType by rememberSaveable { mutableStateOf(original?.goalType ?: "exam") }
     var archived by rememberSaveable { mutableStateOf(original?.archived ?: false) }
-    EditorFrame(if (original == null) "A new chapter." else "Your exam workspace.", vm, onSave = {
-        vm.perform { val hours = target.toDoubleOrNull() ?: error("Enter a weekly target in hours."); vm.repo.commit(listOf(mutation("exam", Exam(id, name.trim(), date, hours, archived, description.trim()))), "Exam saved"); vm.select(id) }
+    EditorFrame(if (original == null) "A new chapter." else "Your study workspace.", vm, onSave = {
+        vm.perform { val hours = target.toDoubleOrNull() ?: error("Enter a weekly target in hours."); vm.repo.commit(listOf(mutation("exam", (original ?: Exam(id, name.trim(), date)).copy(name=name.trim(),date=date,weeklyTarget=hours,archived=archived,description=description.trim(),goalType=goalType))), "Exam saved"); vm.select(id) }
     }, onDelete = original?.let { { vm.open(Editor.Delete("exam", id)) } }) {
-        Field("Exam name", name, { name = it }, hint = "GATE 2027")
-        DateField("Exam date", date, { date = it })
+        Choice("Study goal",goalType,listOf("exam" to "Exam preparation","semester" to "Semester","course" to "Course","personal" to "Personal learning")) { goalType=it }
+        Field("Workspace name", name, { name = it }, hint = "GATE 2027")
+        DateField("Deadline · optional", date, { date = it }, allowEmpty=true)
         Field("Weekly study target · hours", target, { target = it }, numeric = true)
         Field("A note to yourself", description, { description = it }, multiline = true)
         if (original != null) ToggleLine("Archive this exam", archived, { archived = it })
@@ -143,6 +145,8 @@ import kotlinx.coroutines.withContext
     val original = editor.value
     var exam by rememberSaveable { mutableStateOf(original?.examId ?: w.state.topics.firstOrNull { it.id == editor.parent }?.examId ?: w.examId.orEmpty()) }
     var title by rememberSaveable { mutableStateOf(original?.title.orEmpty()) }
+    var pace by rememberSaveable { mutableStateOf(original?.schedulePace?.toString() ?: "1") }
+    var paceMode by rememberSaveable { mutableStateOf(original?.paceMode ?: "daily") }
     var lectureCount by rememberSaveable { mutableStateOf(original?.lectureCount?.toString().orEmpty()) }
     var testCount by rememberSaveable { mutableStateOf(original?.testCount?.toString().orEmpty()) }
     var importance by rememberSaveable { mutableStateOf(original?.importance) }
@@ -155,7 +159,7 @@ import kotlinx.coroutines.withContext
         vm.perform { vm.repo.edit("Topic saved") { current ->
             val parent = original?.parentId ?: editor.parent
             val order = original?.order ?: ((current.topics.filter { it.examId == exam && it.parentId == parent }.maxOfOrNull { it.order } ?: -1.0) + 1)
-            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(title = title.trim(), importance = importance, confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null, lectureCount = if (parent == null) lectureCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count.") else null, testCount = if (parent == null) testCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count.") else null)
+            val topic = (original ?: Topic(id, exam, parent, title.trim(), order)).copy(schedulePace=if (parent==null) pace.toIntOrNull() ?: error("Use a whole lecture pace.") else null,paceMode=paceMode,title = title.trim(), importance = importance, confidence = confidence, reviewOn = review.ifBlank { null }, focusOn = if (focus) current.today else null, lectureCount = if (parent == null) lectureCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count.") else null, testCount = if (parent == null) testCount.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count.") else null)
             listOf(mutation("topic", topic))
         }
         }
@@ -166,6 +170,7 @@ import kotlinx.coroutines.withContext
         Field("Topic title", title, { title = it }, hint = "Subject, chapter, or the smallest subtopic", autoFocus = true, focusKey = id, onSubmit = { saveTopic() })
         if ((original?.parentId ?: editor.parent) == null) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Lecture count", lectureCount, { lectureCount = it }, Modifier.weight(1f), numeric = true); Field("Test count", testCount, { testCount = it }, Modifier.weight(1f), numeric = true) }
+            PaceFields(pace,paceMode,{pace=it},{paceMode=it})
             Body("Totals belong to the subject. Chapter and subtopic progress comes from the lectures/tests you record.")
         }
         ImportancePicker(importance) { importance = it }
@@ -182,8 +187,13 @@ import kotlinx.coroutines.withContext
     var hours by rememberSaveable { mutableStateOf(((original?.minutes ?: editor.timer?.minutes() ?: 60) / 60).toString()) }
     var minutes by rememberSaveable { mutableStateOf(((original?.minutes ?: editor.timer?.minutes() ?: 60) % 60).toString()) }
     var date by rememberSaveable { mutableStateOf(original?.date ?: w.day) }
-    var activity by rememberSaveable { mutableStateOf(original?.activity ?: "Learning") }
+    var activity by rememberSaveable { mutableStateOf(original?.activity ?: editor.initialActivity ?: "Learning") }
     var note by rememberSaveable { mutableStateOf(original?.note ?: editor.timer?.let { "Stopwatch · ${timerClock(it.elapsed())}" }.orEmpty()) }
+    var nextReview by rememberSaveable { mutableStateOf(addDays(w.day,7)) }
+    var questions by rememberSaveable { mutableStateOf(original?.practice!=null) }
+    var correct by rememberSaveable { mutableStateOf((original?.practice?.correct ?: 0).toString()) }
+    var incorrect by rememberSaveable { mutableStateOf((original?.practice?.incorrect ?: 0).toString()) }
+    var skipped by rememberSaveable { mutableStateOf((original?.practice?.skipped ?: 0).toString()) }
     val id = rememberSaveable { original?.id ?: editor.timer?.id ?: uid("session") }
     val index = rememberExamIndex(w, exam)
     var lectureIds by rememberSaveable(topic) { mutableStateOf(emptySet<Int>()) }
@@ -196,11 +206,11 @@ import kotlinx.coroutines.withContext
             val h = hours.toIntOrNull() ?: error("Enter whole hours."); val m = minutes.toIntOrNull() ?: error("Enter whole minutes.")
             require(h >= 0 && m in 0..59 && h * 60 + m in 1..1440) { "Log between 1 minute and 24 hours, with minutes from 0 to 59." }
             val path = withContext(Dispatchers.Default) { TopicIndex(w.state.topics.filter { it.examId == exam }).path(topic).takeLast(10000) }
-            require(lectureIds.all { it !in used && it <= (subject?.lectureCount ?: 0) }) { "Some lectures were already credited. Refresh your selection." }
-            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId, (preservedLectures + lectureIds).distinct().sorted(), subject?.id ?: original?.lectureSubjectId)
+            require(lectureIds.all { it !in used && it <= (subject?.lectureCount?.takeIf { it>0 } ?: 10000) }) { "Some lectures were already credited. Refresh your selection." }
+            val entry = StudySession(id, exam, topic, if (topic != null && path.isBlank()) original?.topicPath.orEmpty() else path, date, h * 60 + m, activity, note.trim(), original?.mockId, (preservedLectures + lectureIds).distinct().sorted(), subject?.id ?: original?.lectureSubjectId,if (questions) Practice(correct.toIntOrNull() ?: error("Enter a whole correct-answer count."),incorrect.toIntOrNull() ?: error("Enter a whole incorrect-answer count."),skipped.toIntOrNull() ?: error("Enter a whole skipped count.")) else null)
             if (editor.timerVersion != null) {
                 vm.repo.sync()
-                vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry)
+                vm.sharedStopwatch.command("log", SharedTimerState(editor.timerVersion, editor.timer), entry,if(activity=="Revision" && topic!=null) nextReview else null)
                 vm.repo.sync()
                 vm.repo.messages.emit("Study time recorded across your devices")
             } else {
@@ -211,6 +221,10 @@ import kotlinx.coroutines.withContext
                         val root = tree.subjects[latest.id] ?: error("Choose a subject.")
                         require(lectureIds.none { it in tree.content(root.id).lectures }) { "Some lectures were already completed. Choose remaining lectures." }
                         changes.add(mutation("topic", latest.copy(lectureIds = (latest.lectureIds + lectureIds).distinct().sorted())))
+                    }
+                    if(activity=="Revision" && topic!=null) {
+                        val current=changes.firstOrNull { it.kind=="topic" && it.id==topic }?.data?.asModel<Topic>() ?: state.topics.firstOrNull { it.id==topic }
+                        if(current!=null) { changes.removeAll { it.kind=="topic" && it.id==topic }; changes.add(mutation("topic",current.copy(lastReviewedOn=date,reviewOn=nextReview))) }
                     }
                     changes
                 }
@@ -225,9 +239,12 @@ import kotlinx.coroutines.withContext
         LogSyllabusCreator(w, vm, exam, topic) { topic = it }
         if (preservedLectures.isNotEmpty()) Body("${preservedLectures.size} lectures already attributed to this entry.")
         LogLecturePicker(subject, used, lectureIds) { lectureIds = it }
+        ToggleLine("Record question practice",questions,{questions=it})
+        if (questions) { Body("Attempted = correct + incorrect. Skipped questions stay separate."); Field("Correct answers",correct,{correct=it},numeric=true); Field("Incorrect answers",incorrect,{incorrect=it},numeric=true); Field("Skipped questions",skipped,{skipped=it},numeric=true) }
         DateField("Study date", date, { date = it })
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Field("Hours", hours, { hours = it }, Modifier.weight(1f), numeric = true); Field("Minutes", minutes, { minutes = it }, Modifier.weight(1f), numeric = true) }
         Choice("Activity", activity, activityLabels.map { it to it }) { activity = it }
+        if(activity=="Revision" && topic!=null) DateField("Next revision",nextReview,{nextReview=it})
         Field("A note about this session", note, { note = it }, multiline = true, hint = "What did you work through?")
     }
 }

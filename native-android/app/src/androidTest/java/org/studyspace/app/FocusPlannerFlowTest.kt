@@ -40,7 +40,7 @@ class FocusPlannerFlowTest {
             settled { vm.workspace.value.topics.any { it.title == name } }
         }
         val leaf = vm.workspace.value.topics.single { it.title == "Packet switching" }
-        runBlocking { vm.repo.commit(listOf(mutation("task", StudyTask("day-lectures",root.examId,"Daily Networks","plan",vm.workspace.value.day,topicId=root.id,lectureTarget=2)))) }
+        runBlocking { vm.repo.commit(listOf(mutation("task", StudyTask(automaticPlanId(root.id,vm.workspace.value.day),root.examId,"Daily Networks","plan",vm.workspace.value.day,topicId=root.id,lectureTarget=2,locked=true)))) }
         compose.onNodeWithText("Choose completed lectures").performScrollTo().performClick()
         compose.onNodeWithText("Lecture 1").performScrollTo().performTouchInput { click() }
         compose.onNodeWithText("Lecture 2").performScrollTo().performTouchInput { click() }

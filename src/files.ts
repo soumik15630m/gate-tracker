@@ -4,7 +4,7 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 export async function saveFile(name: string, contents: string, mime: string) {
   if (Platform.OS === 'web') { const url = URL.createObjectURL(new Blob([contents], { type: mime })); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); return; }
-  const uri = FileSystem.cacheDirectory + name; await FileSystem.writeAsStringAsync(uri, contents); await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: 'Save your Studyspace export' });
+  const uri = FileSystem.cacheDirectory + name; await FileSystem.writeAsStringAsync(uri, contents); await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: 'Save your Study Tracker export' });
 }
 export async function openJsonFile(): Promise<unknown | null> {
   const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'text/plain'], copyToCacheDirectory: true });

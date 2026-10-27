@@ -58,8 +58,10 @@ import java.time.format.DateTimeFormatter
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Body(roots.firstOrNull { it.id == plan.topicId }?.title ?: plan.title, color = Palette.text); Body("$done / $total lectures · ${(total - done).coerceAtLeast(0)} remaining", color = if (done >= total) Palette.teal else Palette.sage) }
                 IconAction("Edit lecture target", Icons.Outlined.Edit) { subject = plan.topicId.orEmpty(); target = total.toString() }
-                IconAction("Remove lecture target", Icons.Outlined.DeleteOutline) { vm.save(listOf(Mutation("task", jsonOf(plan), true)), "Lecture target removed", false) }
+                IconAction(if(plan.automatic) "Make this a rest day" else "Remove lecture target", Icons.Outlined.DeleteOutline) { vm.perform(false) { vm.repo.edit("Lecture target removed. Automatic planning respects this rest day.") { state -> listOf(mutation("task",plan,true))+if(plan.automatic) state.exams.firstOrNull { it.id==plan.examId }?.let { listOf(mutation("exam",it.copy(schedule=(it.schedule ?: Schedule(w.day)).copy(restDates=((it.schedule?.restDates ?: emptyList())+plan.date).distinct())))) } .orEmpty() else emptyList() } } }
             }
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { Action(if(plan.locked) "Unlock day" else "Lock day",secondary=true) { vm.save(listOf(mutation("task",plan.copy(locked=!plan.locked))),"Day protection updated",false) }; Action("Log lectures",secondary=true) { vm.open(Editor.LogForm(topic=plan.topicId)) } }
+            Body((if(plan.automatic) "Automatic" else "Manual")+(if(plan.locked) " · Locked" else "")+(plan.carriedOn?.let { " · Carried forward ${displayDate(it)}" } ?: ""))
             Meter(if (total == 0) 0 else done * 100 / total)
         }
         Choice("Subject for daily lectures", subject, listOf("" to "Choose a subject") + roots.map { it.id to "${it.title} · ${it.lectureCount ?: 0} total lectures" }) { subject = it }
@@ -69,9 +71,9 @@ import java.time.format.DateTimeFormatter
             val n = target.toIntOrNull() ?: error("Enter a whole lecture target.")
             vm.repo.edit("Daily lecture target saved") { state ->
                 val selected = state.topics.firstOrNull { it.id == subject && it.parentId == null } ?: error("Choose a subject.")
-                require(n in 1..(selected.lectureCount ?: 0)) { "The target must fit this subject's lecture total." }
+                require(n in 1..(selected.lectureCount?.takeIf { it>0 } ?: 10000)) { "The target must fit this subject's lecture total." }
                 val previous = state.tasks.firstOrNull { it.lectureTarget != null && it.topicId == subject && it.date == day }
-                listOf(mutation("task", StudyTask(previous?.id ?: uid("task"), selected.examId, "${selected.title} lectures", "plan", day, topicId = subject, lectureTarget = n)))
+                listOf(mutation("task", StudyTask(previous?.id ?: uid("task"), selected.examId, "${selected.title} lectures", "plan", day, topicId = subject, lectureTarget = n,automatic=previous?.automatic ?: false,locked=true,originalDate=previous?.originalDate ?: day,originalTarget=previous?.originalTarget ?: n)))
             }
         } }
         LectureReminderOption(vm)

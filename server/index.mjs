@@ -1,3 +1,4 @@
+import { buildSchedule } from '../shared/planner.mjs';
 import { unpackTimer, timerReply, transitionTimer, timerLogWrites } from './timer.mjs';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
@@ -115,7 +116,15 @@ export function createStudyServer(options = {}) {
               db.prepare('INSERT INTO receipts VALUES(?,?,?,?)').run(session.user_id, change.mutationId, change.id, revision);
               accepted.push({ id: change.id, mutationId: change.mutationId, version: revision });
             }
+            const allRecords = db.prepare('SELECT * FROM records WHERE user_id=?').all(session.user_id).map(unpack);
+            const timezone = allRecords.find(r => !r.deleted && r.kind === 'preferences')?.data.timezone || 'UTC';
+            const today = new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+            for (const change of buildSchedule(allRecords,today).writes) {
+              revision++;
+              db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,version=excluded.version,changed_at=excluded.changed_at').run(session.user_id,change.data.id,change.kind,JSON.stringify(change.data),change.deleted ? 1 : 0,revision,new Date().toISOString());
+            }
             validateRelationships(db.prepare('SELECT * FROM records WHERE user_id=?').all(session.user_id).map(unpack));
+            if (db.prepare('SELECT COUNT(*) AS count FROM records WHERE user_id=? AND deleted=0').get(session.user_id).count > 20000) throw httpError(400,'A workspace supports up to 20,000 records.');
             db.prepare('UPDATE users SET revision=? WHERE id=?').run(revision, session.user_id);
             const records = db.prepare('SELECT * FROM records WHERE user_id=? AND version>? ORDER BY version').all(session.user_id, input.cursor).map(unpack);
             db.exec('COMMIT'); return json(res, 200, { cursor: revision, records, accepted, conflicts });

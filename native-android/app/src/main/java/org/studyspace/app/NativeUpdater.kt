@@ -82,7 +82,7 @@ class NativeUpdater(private val context: Context) {
         val file = state.value.verifiedApk ?: return
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            state.value = state.value.copy(message = "Allow Studyspace to request installation, then return and tap Install verified update.")
+            state.value = state.value.copy(message = "Allow Study Tracker to request installation, then return and tap Install verified update.")
             return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)

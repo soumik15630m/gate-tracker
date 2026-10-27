@@ -9,6 +9,8 @@ const optionalCount = value => value == null || Number.isInteger(value) && numbe
 const contentIds = value => value === undefined || Array.isArray(value) && value.length <= 10000 && new Set(value).size === value.length && value.every(n => Number.isInteger(n) && number(n, 1, 10000));
 // Older clients omit this new field; only an explicit null should clear a rating.
 export function preserveTopicImportance(kind, data, previous) {
+  const fields = { exam: ['goalType', 'schedule'], topic: ['schedulePace', 'paceMode'], session: ['practice'], task: ['automatic', 'locked', 'originalDate', 'originalTarget', 'carriedOn', 'carriedCount'] }[kind] || [];
+  data = { ...data }; for (const key of fields) if (data[key] === undefined && previous?.[key] !== undefined) data[key] = previous[key];
   if (kind === 'session' && data.lectureIds === undefined && previous?.lectureIds !== undefined) return { ...data, lectureIds: previous.lectureIds, lectureSubjectId: previous.lectureSubjectId };
   if (kind === 'task' && data.lectureTarget === undefined && previous?.lectureTarget != null) return { ...data, lectureTarget: previous.lectureTarget };
   return kind === 'topic' && data.importance === undefined && previous?.importance !== undefined ? { ...data, importance: previous.importance } : data;
@@ -18,11 +20,11 @@ export function validateEntity(kind, data) {
   const d = data;
   if (kind !== 'preferences' && !id(d.examId) && kind !== 'exam') return false;
   switch (kind) {
-    case 'exam': return text(d.name) && validDate(d.date) && number(d.weeklyTarget, 0, 168) && typeof d.archived === 'boolean' && (d.description == null || text(d.description, 1000, false));
-    case 'topic': return text(d.title) && (d.parentId === null || id(d.parentId)) && number(d.order, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) && (d.completedOn === null || validDate(d.completedOn)) && ['unrated', 'needs-work', 'getting-there', 'confident'].includes(d.confidence) && optionalDate(d.reviewOn) && optionalDate(d.lastReviewedOn) && optionalDate(d.focusOn) && optionalCount(d.lectureCount) && optionalCount(d.testCount) && (d.parentId === null || d.lectureCount == null && d.testCount == null) && contentIds(d.lectureIds) && contentIds(d.testIds) && (d.importance == null || Number.isInteger(d.importance) && number(d.importance, 1, 5));
-    case 'session': return optionalId(d.topicId) && text(d.topicPath, 10000, false) && validDate(d.date) && Number.isInteger(d.minutes) && number(d.minutes, 1, 1440) && ['Learning', 'Revision', 'Practice', 'Mock test'].includes(d.activity) && text(d.note, 10000, false) && optionalId(d.mockId) && contentIds(d.lectureIds) && optionalId(d.lectureSubjectId) && (!(d.lectureIds?.length) || id(d.lectureSubjectId));
+    case 'exam': return text(d.name) && typeof d.date === 'string' && optionalDate(d.date) && number(d.weeklyTarget, 0, 168) && typeof d.archived === 'boolean' && (d.description == null || text(d.description, 1000, false)) && (d.goalType === undefined || ['exam','semester','course','personal'].includes(d.goalType)) && (d.schedule == null || validSchedule(d.schedule));
+    case 'topic': return text(d.title) && (d.parentId === null || id(d.parentId)) && number(d.order, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) && (d.completedOn === null || validDate(d.completedOn)) && ['unrated', 'needs-work', 'getting-there', 'confident'].includes(d.confidence) && optionalDate(d.reviewOn) && optionalDate(d.lastReviewedOn) && optionalDate(d.focusOn) && optionalCount(d.lectureCount) && optionalCount(d.testCount) && (d.parentId === null || d.lectureCount == null && d.testCount == null && d.schedulePace == null) && contentIds(d.lectureIds) && contentIds(d.testIds) && (d.importance == null || Number.isInteger(d.importance) && number(d.importance, 1, 5)) && (d.schedulePace == null || Number.isInteger(d.schedulePace) && number(d.schedulePace, 0, 100)) && (d.paceMode === undefined || ['daily','weekly'].includes(d.paceMode));
+    case 'session': return optionalId(d.topicId) && text(d.topicPath, 10000, false) && validDate(d.date) && Number.isInteger(d.minutes) && number(d.minutes, 1, 1440) && ['Learning', 'Revision', 'Practice', 'Mock test'].includes(d.activity) && text(d.note, 10000, false) && optionalId(d.mockId) && contentIds(d.lectureIds) && optionalId(d.lectureSubjectId) && (!(d.lectureIds?.length) || id(d.lectureSubjectId)) && (d.practice == null || validPractice(d.practice));
     case 'mock': return text(d.name) && text(d.series, 300, false) && validDate(d.date) && number(d.maximum, 0.01) && number(d.score, -d.maximum, d.maximum) && Number.isInteger(d.minutes) && number(d.minutes, 1, 1440) && ['correct', 'incorrect', 'unattempted'].every(k => d[k] == null || (Number.isInteger(d[k]) && number(d[k]))) && Array.isArray(d.sections) && d.sections.length <= 200 && d.sections.every(s => s && typeof s === 'object' && text(s.name) && number(s.maximum, 0.01) && number(s.score, -s.maximum, s.maximum)) && Array.isArray(d.mistakes) && d.mistakes.length <= 300 && d.mistakes.every(m => m && typeof m === 'object' && optionalId(m.topicId) && ['Concept gap', 'Recall', 'Calculation', 'Misreading', 'Time pressure'].includes(m.category) && text(m.note, 5000, false));
-    case 'task': return text(d.title, 1000) && ['inbox', 'milestone', 'plan'].includes(d.type) && typeof d.date === 'string' && optionalDate(d.date) && typeof d.done === 'boolean' && optionalId(d.topicId) && (d.notes == null || text(d.notes, 10000, false)) && (d.minutes == null || Number.isInteger(d.minutes) && number(d.minutes, 1, 1440)) && (d.activity == null || ['Learning', 'Revision', 'Practice', 'Mock test'].includes(d.activity)) && (d.lectureTarget == null || Number.isInteger(d.lectureTarget) && number(d.lectureTarget, 1, 10000) && d.type === 'plan' && id(d.topicId)) && (d.type !== 'plan' || validDate(d.date) && (d.lectureTarget != null || d.minutes != null && d.activity != null));
+    case 'task': return text(d.title, 1000) && ['inbox', 'milestone', 'plan'].includes(d.type) && typeof d.date === 'string' && optionalDate(d.date) && typeof d.done === 'boolean' && optionalId(d.topicId) && (d.notes == null || text(d.notes, 10000, false)) && (d.minutes == null || Number.isInteger(d.minutes) && number(d.minutes, 1, 1440)) && (d.activity == null || ['Learning', 'Revision', 'Practice', 'Mock test'].includes(d.activity)) && (d.lectureTarget == null || Number.isInteger(d.lectureTarget) && number(d.lectureTarget, 1, 10000) && d.type === 'plan' && id(d.topicId)) && validPlanExtras(d) && (d.type !== 'plan' || validDate(d.date) && (d.lectureTarget != null || d.minutes != null && d.activity != null));
     case 'reflection': return validDate(d.week) && ['worked', 'improve', 'next'].every(k => text(d[k], 10000, false));
     case 'preferences': { if (!text(d.timezone, 100)) return false; try { new Intl.DateTimeFormat('en', { timeZone: d.timezone }); } catch { return false; } return d.id === 'preferences' && number(d.streakMinimum, 1, 1440) && Number.isInteger(d.streakMinimum) && text(d.displayName, 100, false); }
     default: return false;
@@ -58,7 +60,7 @@ export function validateRelationships(records) {
   }
   for (const topic of topics.values()) {
     const subject = roots.get(topic.id);
-    if ((topic.lectureIds || []).some(n => n > (subject?.lectureCount || 0)) || (topic.testIds || []).some(n => n > (subject?.testCount || 0))) throw new Error('Recorded lecture or test numbers exceed the subject total.');
+    if ((topic.lectureIds || []).some(n => n > (subject?.lectureCount || 10000)) || (topic.testIds || []).some(n => n > (subject?.testCount || 0))) throw new Error('Recorded lecture or test numbers exceed the subject total.');
   }
 }
 
@@ -72,7 +74,7 @@ export function validateLectureRecords(records) {
     if (record.kind === 'session' && d.lectureIds?.length) {
       const subject = topics.get(d.lectureSubjectId);
       if (!subject) { if (removed.has(d.lectureSubjectId)) continue; throw new Error('Choose a subject for completed lectures.'); }
-      if (subject.parentId !== null || subject.examId !== d.examId || d.lectureIds.some(n => n > (subject.lectureCount || 0))) throw new Error('Completed lectures exceed the subject total.');
+      if (subject.parentId !== null || subject.examId !== d.examId || d.lectureIds.some(n => n > (subject.lectureCount || 10000))) throw new Error('Completed lectures exceed the subject total.');
       let selected = topics.get(d.topicId); const ancestors = new Set();
       while (selected?.parentId && !ancestors.has(selected.id)) { ancestors.add(selected.id); selected = topics.get(selected.parentId); }
       if (selected && selected.id !== subject.id) throw new Error('Completed lectures belong to a different subject than the selected topic.');
@@ -81,8 +83,14 @@ export function validateLectureRecords(records) {
     if (record.kind === 'task' && d.lectureTarget != null) {
       const subject = topics.get(d.topicId);
       if (!subject && removed.has(d.topicId)) continue;
-      if (!subject || subject.parentId !== null || subject.examId !== d.examId || d.lectureTarget > (subject.lectureCount || 0)) throw new Error('Daily lecture targets must fit the subject lecture total.');
+      if (!subject || subject.parentId !== null || subject.examId !== d.examId || d.lectureTarget > (subject.lectureCount || 10000) && !(d.originalTarget != null && (d.date < new Date().toISOString().slice(0,10) || d.done))) throw new Error('Daily lecture targets must fit the subject lecture total.');
       const key = `${d.topicId}:${d.date}`; if (targets.has(key)) throw new Error('Edit the existing lecture target for this subject and day.'); targets.add(key);
     }
   }
 }
+
+function validSchedule(s) {
+  return s && typeof s === 'object' && validDate(s.start) && (s.end === undefined || typeof s.end === 'string' && optionalDate(s.end)) && (!s.end || s.end >= s.start) && Array.isArray(s.weekdays) && s.weekdays.length > 0 && s.weekdays.length <= 7 && new Set(s.weekdays).size === s.weekdays.length && s.weekdays.every(n => Number.isInteger(n) && n >= 0 && n <= 6) && Array.isArray(s.restDates) && s.restDates.length <= 730 && s.restDates.every(validDate) && (s.dailyLimit == null || Number.isInteger(s.dailyLimit) && number(s.dailyLimit,1,100));
+}
+function validPractice(p) { return p && typeof p === 'object' && ['correct','incorrect','skipped'].every(k => Number.isInteger(p[k]) && number(p[k],0,1000000)) && p.correct + p.incorrect + p.skipped <= 1000000; }
+function validPlanExtras(d) { return ['automatic','locked'].every(k => d[k] === undefined || typeof d[k] === 'boolean') && optionalDate(d.originalDate) && optionalDate(d.carriedOn) && (d.carriedCount == null || Number.isInteger(d.carriedCount) && number(d.carriedCount,0,d.originalTarget || d.lectureTarget || 10000)) && (d.originalTarget == null || Number.isInteger(d.originalTarget) && number(d.originalTarget,1,10000)); }

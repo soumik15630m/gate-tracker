@@ -35,13 +35,15 @@ fun validDate(day: String) = day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && runCa
 inline fun <reified T> jsonOf(value: T): JsonObject = codec.encodeToJsonElement(value).jsonObject
 inline fun <reified T> JsonObject.asModel(): T = codec.decodeFromJsonElement(this)
 
-@Serializable data class Exam(val id: String, val name: String, val date: String, val weeklyTarget: Double = 20.0, val archived: Boolean = false, val description: String? = "")
-@Serializable data class Topic(val id: String, val examId: String, val parentId: String? = null, val title: String, val order: Double = 0.0, val completedOn: String? = null, val confidence: String = "unrated", val reviewOn: String? = null, val lastReviewedOn: String? = null, val focusOn: String? = null, val lectureCount: Int? = null, val testCount: Int? = null, val lectureIds: List<Int> = emptyList(), val testIds: List<Int> = emptyList(), val importance: Int? = null)
-@Serializable data class StudySession(val id: String, val examId: String, val topicId: String? = null, val topicPath: String = "", val date: String, val minutes: Int, val activity: String = "Learning", val note: String = "", val mockId: String? = null, val lectureIds: List<Int> = emptyList(), val lectureSubjectId: String? = null)
+@Serializable data class Schedule(val start: String, val end: String = "", val weekdays: List<Int> = listOf(1,2,3,4,5,6), val restDates: List<String> = emptyList(), val dailyLimit: Int? = null)
+@Serializable data class Practice(val correct: Int = 0, val incorrect: Int = 0, val skipped: Int = 0)
+@Serializable data class Exam(val id: String, val name: String, val date: String, val weeklyTarget: Double = 20.0, val archived: Boolean = false, val description: String? = "", val goalType: String = "exam", val schedule: Schedule? = null)
+@Serializable data class Topic(val id: String, val examId: String, val parentId: String? = null, val title: String, val order: Double = 0.0, val completedOn: String? = null, val confidence: String = "unrated", val reviewOn: String? = null, val lastReviewedOn: String? = null, val focusOn: String? = null, val lectureCount: Int? = null, val testCount: Int? = null, val lectureIds: List<Int> = emptyList(), val testIds: List<Int> = emptyList(), val importance: Int? = null, val schedulePace: Int? = null, val paceMode: String = "daily")
+@Serializable data class StudySession(val id: String, val examId: String, val topicId: String? = null, val topicPath: String = "", val date: String, val minutes: Int, val activity: String = "Learning", val note: String = "", val mockId: String? = null, val lectureIds: List<Int> = emptyList(), val lectureSubjectId: String? = null, val practice: Practice? = null)
 @Serializable data class MockSection(val name: String, val score: Double, val maximum: Double)
 @Serializable data class Mistake(val topicId: String? = null, val category: String = "Concept gap", val note: String = "")
 @Serializable data class MockTest(val id: String, val examId: String, val name: String, val series: String = "", val date: String, val score: Double, val maximum: Double = 100.0, val minutes: Int = 180, val correct: Int? = null, val incorrect: Int? = null, val unattempted: Int? = null, val sections: List<MockSection> = emptyList(), val mistakes: List<Mistake> = emptyList())
-@Serializable data class StudyTask(val id: String, val examId: String, val title: String, val type: String = "inbox", val date: String = "", val done: Boolean = false, val topicId: String? = null, val minutes: Int? = null, val activity: String? = null, val notes: String? = null, val lectureTarget: Int? = null)
+@Serializable data class StudyTask(val id: String, val examId: String, val title: String, val type: String = "inbox", val date: String = "", val done: Boolean = false, val topicId: String? = null, val minutes: Int? = null, val activity: String? = null, val notes: String? = null, val lectureTarget: Int? = null, val automatic: Boolean = false, val locked: Boolean = false, val originalDate: String? = null, val originalTarget: Int? = null, val carriedOn: String? = null, val carriedCount: Int? = null)
 @Serializable data class Reflection(val id: String, val examId: String, val week: String, val worked: String = "", val improve: String = "", val next: String = "")
 @Serializable data class Preferences(val id: String = "preferences", val timezone: String = ZoneId.systemDefault().id, val streakMinimum: Int = 1, val displayName: String = "")
 @Serializable data class WireRecord(val id: String, val kind: String, val data: JsonObject, val version: Long = 0, val deleted: Boolean = false, val changedAt: String? = null)
@@ -136,7 +138,7 @@ class TopicIndex(val topics: List<Topic>, sessions: List<StudySession> = emptyLi
         val order = (children[parent].orEmpty().maxOfOrNull { it.order } ?: -1.0) + 1
         return branch(id).mapNotNull { key ->
             val node = byId.getValue(key)
-            val moved = if (key == id) node.copy(parentId = parent, order = order, lectureCount = if (parent == null) node.lectureCount else null, testCount = if (parent == null) node.testCount else null) else node
+            val moved = if (key == id) node.copy(parentId = parent, order = order, schedulePace = if (parent == null) node.schedulePace else null, lectureCount = if (parent == null) node.lectureCount else null, testCount = if (parent == null) node.testCount else null) else node
             val next = if (different) moved.copy(lectureIds = emptyList(), testIds = emptyList()) else moved
             if (next == node) null else mutation("topic", next)
         }
@@ -210,11 +212,11 @@ fun validate(kind: String, data: JsonObject) {
     require(id(data["id"]?.jsonPrimitive?.content)) { "Invalid record identifier." }
     if (kind != "exam" && kind != "preferences") require(id(data["examId"]?.jsonPrimitive?.content)) { "Choose an exam." }
     val valid = when (kind) {
-        "exam" -> data.asModel<Exam>().let { text(it.name) && validDate(it.date) && it.weeklyTarget.isFinite() && it.weeklyTarget in 0.0..168.0 && text(it.description.orEmpty(), 1000, false) }
-        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && (it.completedOn == null || validDate(it.completedOn)) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) && count(it.lectureCount) && count(it.testCount) && (it.parentId == null || it.lectureCount == null && it.testCount == null) && contentIds(it.lectureIds) && contentIds(it.testIds) && (it.importance == null || it.importance in 1..5) }
-        "session" -> data.asModel<StudySession>().let { (it.topicId == null || id(it.topicId)) && text(it.topicPath, 10000, false) && validDate(it.date) && it.minutes in 1..1440 && it.activity in activityLabels && text(it.note, 10000, false) && (it.mockId == null || id(it.mockId)) && contentIds(it.lectureIds) && (it.lectureIds.isEmpty() || it.lectureSubjectId?.let(::id) == true) }
+        "exam" -> data.asModel<Exam>().let { text(it.name) && date(it.date) && it.goalType in listOf("exam","semester","course","personal") && (it.schedule == null || validSchedule(it.schedule)) && it.weeklyTarget.isFinite() && it.weeklyTarget in 0.0..168.0 && text(it.description.orEmpty(), 1000, false) }
+        "topic" -> data.asModel<Topic>().let { text(it.title) && (it.parentId == null || id(it.parentId)) && it.order.isFinite() && kotlin.math.abs(it.order) <= 9007199254740991.0 && (it.completedOn == null || validDate(it.completedOn)) && confidenceLabels.containsKey(it.confidence) && date(it.reviewOn) && date(it.focusOn) && date(it.lastReviewedOn) && count(it.lectureCount) && count(it.testCount) && (it.parentId == null || it.lectureCount == null && it.testCount == null && it.schedulePace == null) && contentIds(it.lectureIds) && contentIds(it.testIds) && (it.importance == null || it.importance in 1..5) && (it.schedulePace == null || it.schedulePace in 0..100) && it.paceMode in listOf("daily","weekly") }
+        "session" -> data.asModel<StudySession>().let { (it.topicId == null || id(it.topicId)) && text(it.topicPath, 10000, false) && validDate(it.date) && it.minutes in 1..1440 && it.activity in activityLabels && text(it.note, 10000, false) && (it.mockId == null || id(it.mockId)) && contentIds(it.lectureIds) && (it.lectureIds.isEmpty() || it.lectureSubjectId?.let(::id) == true) && (it.practice == null || listOf(it.practice.correct,it.practice.incorrect,it.practice.skipped).all { n -> n in 0..1000000 } && it.practice.correct.toLong()+it.practice.incorrect+it.practice.skipped <= 1000000) }
         "mock" -> data.asModel<MockTest>().let { text(it.name) && text(it.series, 300, false) && validDate(it.date) && it.maximum.isFinite() && it.maximum in 0.01..1e6 && it.score.isFinite() && it.score in -it.maximum..it.maximum && it.minutes in 1..1440 && listOf(it.correct, it.incorrect, it.unattempted).all { n -> n == null || n in 0..1000000 } && it.sections.size <= 200 && it.sections.all { s -> text(s.name) && s.maximum.isFinite() && s.maximum in 0.01..1e6 && s.score.isFinite() && s.score in -s.maximum..s.maximum } && it.mistakes.size <= 300 && it.mistakes.all { m -> (m.topicId == null || id(m.topicId)) && m.category in mistakeLabels && text(m.note, 5000, false) } }
-        "task" -> data.asModel<StudyTask>().let { text(it.title, 1000) && it.type in listOf("inbox", "milestone", "plan") && date(it.date) && (it.topicId == null || id(it.topicId)) && (it.minutes == null || it.minutes in 1..1440) && (it.activity == null || it.activity in activityLabels) && text(it.notes.orEmpty(), 10000, false) && (it.lectureTarget == null || it.lectureTarget in 1..10000 && it.type == "plan" && it.topicId != null) && (it.type != "plan" || validDate(it.date) && (it.lectureTarget != null || it.minutes != null && it.activity != null)) }
+        "task" -> data.asModel<StudyTask>().let { text(it.title, 1000) && it.type in listOf("inbox", "milestone", "plan") && date(it.date) && (it.topicId == null || id(it.topicId)) && (it.minutes == null || it.minutes in 1..1440) && (it.activity == null || it.activity in activityLabels) && text(it.notes.orEmpty(), 10000, false) && (it.lectureTarget == null || it.lectureTarget in 1..10000 && it.type == "plan" && it.topicId != null) && date(it.originalDate) && date(it.carriedOn) && (it.carriedCount == null || it.carriedCount in 0..(it.originalTarget ?: it.lectureTarget ?: 10000)) && (it.originalTarget == null || it.originalTarget in 1..10000) && (it.type != "plan" || validDate(it.date) && (it.lectureTarget != null || it.minutes != null && it.activity != null)) }
         "reflection" -> data.asModel<Reflection>().let { validDate(it.week) && text(it.worked, 10000, false) && text(it.improve, 10000, false) && text(it.next, 10000, false) }
         "preferences" -> data.asModel<Preferences>().let { it.id == "preferences" && runCatching { ZoneId.of(it.timezone) }.isSuccess && it.streakMinimum in 1..1440 && text(it.displayName, 100, false) }
         else -> false
@@ -242,7 +244,7 @@ fun validateRelationships(records: Collection<WireRecord>) {
     }
     topics.values.forEach { topic ->
         val subject = roots[topic.id]
-        require(topic.lectureIds.all { it <= (subject?.lectureCount ?: 0) } && topic.testIds.all { it <= (subject?.testCount ?: 0) }) { "Recorded lecture or test numbers exceed the subject total." }
+        require(topic.lectureIds.all { it <= (subject?.lectureCount?.takeIf { n -> n > 0 } ?: 10000) } && topic.testIds.all { it <= (subject?.testCount ?: 0) }) { "Recorded lecture or test numbers exceed the subject total." }
     }
 }
 fun readBackup(source: String): List<BackupRecord> {
@@ -279,7 +281,7 @@ fun validateLectureRecords(records: Collection<WireRecord>) {
                 val subject = topics[session.lectureSubjectId]
                 if (subject == null) require(session.lectureSubjectId in removed) { "Choose a subject for completed lectures." }
                 else {
-                    require(subject.parentId == null && subject.examId == session.examId && session.lectureIds.all { it <= (subject.lectureCount ?: 0) }) { "Completed lectures exceed the subject total." }
+                    require(subject.parentId == null && subject.examId == session.examId && session.lectureIds.all { it <= (subject.lectureCount?.takeIf { n -> n > 0 } ?: 10000) }) { "Completed lectures exceed the subject total." }
                     var selected = topics[session.topicId]; val ancestors = HashSet<String>()
                     while (selected?.parentId != null && ancestors.add(selected!!.id)) selected = topics[selected!!.parentId]
                     require(selected == null || selected!!.id == subject.id) { "Completed lectures belong to a different subject than the selected topic." }
@@ -292,9 +294,11 @@ fun validateLectureRecords(records: Collection<WireRecord>) {
             plan.lectureTarget?.let { target ->
                 val subject = topics[plan.topicId]
                 if (subject == null && plan.topicId in removed) return@let
-                require(subject != null && subject.parentId == null && subject.examId == plan.examId && target <= (subject.lectureCount ?: 0)) { "Daily lecture targets must fit the subject total." }
+                require(subject != null && subject.parentId == null && subject.examId == plan.examId && (target <= (subject.lectureCount?.takeIf { n -> n > 0 } ?: 10000) || plan.originalTarget!=null && (plan.date < today() || plan.done))) { "Daily lecture targets must fit the subject total." }
                 require(targets.add("${plan.topicId}:${plan.date}")) { "Edit the existing target for this subject and day." }
             }
         }
     }
 }
+
+fun validSchedule(s: Schedule) = validDate(s.start) && (s.end.isEmpty() || validDate(s.end) && s.end >= s.start) && s.weekdays.isNotEmpty() && s.weekdays.size <= 7 && s.weekdays.distinct().size == s.weekdays.size && s.weekdays.all { it in 0..6 } && s.restDates.size <= 730 && s.restDates.all(::validDate) && (s.dailyLimit == null || s.dailyLimit in 1..100)

@@ -77,7 +77,7 @@ enum class Screen(val title: String) { TODAY("Today"), SYLLABUS("Syllabus"), LOG
 sealed interface Editor {
     data class ExamForm(val value: Exam? = null) : Editor
     data class TopicForm(val value: Topic? = null, val parent: String? = null) : Editor
-    data class LogForm(val value: StudySession? = null, val topic: String? = null, val timer: StudyTimer? = null, val timerScope: String? = null, val timerVersion: Long? = null) : Editor
+    data class LogForm(val value: StudySession? = null, val topic: String? = null, val timer: StudyTimer? = null, val timerScope: String? = null, val timerVersion: Long? = null, val initialActivity: String? = null) : Editor
     data class MockForm(val value: MockTest? = null) : Editor
     data class TaskForm(val value: StudyTask? = null, val type: String = "milestone") : Editor
     data class ReflectionForm(val value: Reflection? = null) : Editor
@@ -171,7 +171,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     Scaffold(containerColor = Color.Black, contentColor = Palette.text, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snack) }, bottomBar = { BottomNavigation(route) { vm.screen.value = it } }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("studyspace", fontFamily = Serif, fontSize = 24.sp, color = Palette.text)
+                Text("Study Tracker", fontFamily = Serif, fontSize = 24.sp, color = Palette.text)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(5.dp).background(if (account == null) Palette.muted else Palette.sage, androidx.compose.foundation.shape.CircleShape)); Spacer(Modifier.width(7.dp))
                     Text(if (account == null) "ON THIS DEVICE" else status.uppercase(), fontFamily = Sans, fontSize = 9.sp, letterSpacing = 1.sp, color = Palette.muted)
@@ -207,13 +207,13 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     Box(Modifier.padding(horizontal = 20.dp, vertical = 7.dp)) {
         Row(Modifier.fillMaxWidth().clickable { open = true }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Layers, null, tint = Palette.sage, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(10.dp))
-            Text(w.exam?.name ?: "All exam workspaces", fontFamily = Sans, fontSize = 12.sp, color = Palette.text, modifier = Modifier.weight(1f))
+            Text(w.exam?.name ?: "All study goals", fontFamily = Sans, fontSize = 12.sp, color = Palette.text, modifier = Modifier.weight(1f))
             Icon(Icons.Outlined.UnfoldMore, null, tint = Palette.muted, modifier = Modifier.size(17.dp))
         }
         DropdownMenu(open, { open = false }, containerColor = Palette.raised) {
-            DropdownMenuItem(text = { Body("All exam workspaces", color = Palette.text) }, onClick = { vm.select("all"); open = false })
+            DropdownMenuItem(text = { Body("All study goals", color = Palette.text) }, onClick = { vm.select("all"); open = false })
             w.state.exams.forEach { exam -> DropdownMenuItem(text = { Body(exam.name + if (exam.archived) " · archived" else "", color = Palette.text) }, onClick = { vm.select(exam.id); open = false }) }
-            DropdownMenuItem(text = { Body("+ Add an exam", color = Palette.sage) }, onClick = { vm.open(Editor.ExamForm()); open = false })
+            DropdownMenuItem(text = { Body("+ Add a study goal", color = Palette.sage) }, onClick = { vm.open(Editor.ExamForm()); open = false })
         }
     }
 }

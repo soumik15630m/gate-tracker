@@ -154,8 +154,8 @@ class NativeFlowTest {
         settled { vm.repo.ready.value }
         runBlocking { vm.repo.startFresh() }
         settled { vm.workspace.value.state.exams.isEmpty() }
-        compose.onNodeWithText("Create your first exam").performClick()
-        compose.onNodeWithTag("Exam name").performTextInput("Android test exam")
+        compose.onNodeWithText("Create your first study goal").performClick()
+        compose.onNodeWithTag("Workspace name").performTextInput("Android test exam")
         compose.waitForIdle()
         compose.onNodeWithText("Save", useUnmergedTree = true).performClick()
         settled { vm.workspace.value.exam?.name == "Android test exam" || vm.workingError.value.isNotBlank() }

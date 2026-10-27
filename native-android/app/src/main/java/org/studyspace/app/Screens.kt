@@ -38,14 +38,14 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
     LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "heading") { PageHeading("One day at a time", "Make today count.", if (w.state.preferences.displayName.isBlank()) "A quiet space for meaningful progress." else "Welcome back, ${w.state.preferences.displayName}.") }
         if (w.activeExams.isEmpty()) {
-            item { EmptyCard("Your next chapter starts here", "Add an exam, bring in your syllabus, and take your first small step.") { Action("Create your first exam", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } } }
+            item { EmptyCard("Your next chapter starts here", "Add a study goal, bring in your syllabus, and take your first small step.") { Action("Create your first study goal", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } } }
             return@LazyColumn
         }
         w.nearest?.let { exam -> item(key = "countdown") {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) { Label("THE NEXT CHAPTER", Palette.sage); Text(exam.name, fontFamily = Sans, color = Palette.text, fontSize = 16.sp); Body(displayDate(exam.date)) }
-                    Column(horizontalAlignment = Alignment.End) { Text(dayDifference(w.day, exam.date).coerceAtLeast(0).toString(), fontFamily = Serif, fontSize = 48.sp, color = Palette.sage); Label("DAYS TO GO") }
+                    Column(horizontalAlignment = Alignment.End) { Text(if(exam.date.isBlank()) "∞" else dayDifference(w.day, exam.date).coerceAtLeast(0).toString(), fontFamily = Serif, fontSize = 48.sp, color = Palette.sage); Label("DAYS TO GO") }
                 }
                 Meter(w.index.total.percent)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${w.index.total.percent}% of the syllabus covered"); Body("${w.index.total.done}/${w.index.total.total}", color = Palette.teal) }
@@ -55,6 +55,7 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
         } }
         item(key = "stats-a") { StatPair({ Stat("STUDIED TODAY", duration(w.days[w.day] ?: 0), "${w.sessions.count { it.date == w.day }} study entries", it) }, { Stat("CURRENT STREAK", "${w.state.streak.current} days", "Best: ${w.state.streak.longest} days", it, Palette.gold) }) }
         item(key = "stats-b") { StatPair({ Stat("THIS WEEK", duration(w.weekMinutes), "of ${w.target.toInt()}h weekly intention", it) }, { Stat("COVERAGE", "${w.index.total.percent}%", "${w.index.total.done} of ${w.index.total.total} final items", it, Palette.teal) }) }
+        item(key = "agenda") { DailyAgenda(w,vm) }
         item(key = "weekly") { Card(title = "A little more, every day", subtitle = "Your study time this week") { TimeBars(weeklyValues, listOf("M", "T", "W", "T", "F", "S", "S"), dates = (0L..6L).map { addDays(weekStart(w.day), it) }, sessions = w.sessions); Meter(if (w.target > 0) (w.weekMinutes / (w.target * 60) * 100).toInt() else 0, color = Palette.sage) } }
         if (focus.isNotEmpty()) item(key = "focus-heading") { SectionTitle("Today’s focus", "${focus.size} selected topics") }
         items(focus, key = { "focus-${it.id}" }, contentType = { "focus" }) { topic -> TopicSummary(topic, w.index, vm) }
@@ -126,6 +127,7 @@ private val pagePadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp,
             Card(Modifier.clickable { vm.open(Editor.LogForm(session)) }) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Chip(session.activity, selected = true, color = if (session.activity == "Revision") Palette.teal else Palette.sage); Text(duration(session.minutes), fontFamily = Serif, color = Palette.text, fontSize = 25.sp) }
                 Text(session.topicPath.ifBlank { w.state.exams.firstOrNull { it.id == session.examId }?.name ?: "General study" }, fontFamily = Sans, color = Palette.text, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                session.practice?.let { Body("${it.correct} correct · ${it.incorrect} incorrect · ${it.skipped} skipped") }
                 if (session.lectureIds.isNotEmpty()) Body("${session.lectureIds.size} lectures completed · ${session.lectureIds.joinToString()}", color = Palette.sage)
                 if (session.note.isNotBlank()) Body(session.note, maxLines = 3)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body(displayDate(session.date)); Body("Edit entry", color = Palette.sage) }
@@ -196,6 +198,7 @@ fun formatScore(score: Double) = if (score % 1.0 == 0.0) score.toInt().toString(
         else {
             item { StatPair({ Stat("STUDY TIME", duration(data.minutes), "${data.sessions} entries in this period", it) }, { Stat("ACTIVE DAYS", data.active.toString(), "${duration(data.average)} average per study day", it, Palette.teal) }) }
             item { StatPair({ Stat("CHECKLIST CLOSED", data.closed.toString(), "Closing dates within this period", it, Palette.teal) }, { Stat("LONGEST STREAK", "${w.state.streak.longest} days", "Across all your exams", it, Palette.gold) }) }
+            item { StudyEvidence(w,vm) }
             item { Card(title = "Your effort over time", subtitle = "Daily study minutes") { TimeBars(data.bars, data.labels, dates = data.barDates, sessions = w.sessions, bucketDays = data.bucketWidth) } }
             item { Card(title = "Consistency", subtitle = "Thirteen weeks of showing up") { ActivityGrid(w.days, w.day, sessions = w.sessions) } }
             item { Card(title = "Where your time goes", subtitle = "Direct and nested study time, counted once") {
@@ -207,7 +210,6 @@ fun formatScore(score: Double) = if (score % 1.0 == 0.0) score.toInt().toString(
             item { SectionTitle("Subject coverage", "Closing one final item moves the whole branch forward.") }
             items(w.index.children[null].orEmpty(), key = { "coverage-${it.id}" }, contentType = { "subject" }) { topic -> val progress = w.index.progress[topic.id] ?: Progress(); Card(title = topic.title) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Body("${progress.done}/${progress.total} complete"); Body("${progress.percent}%", color = Palette.teal) }; Meter(progress.percent); ContentMeters(w.index, topic.id) } }
             if (data.neglected.isNotEmpty()) item { Card(title = "A gentle nudge", subtitle = "Subjects with no logged study time in the last 14 days") { data.neglected.take(5).forEach { Body(it, color = Palette.gold) } } }
-            if (data.forecast != null) item { Card(title = "At your recent pace") { Body("Around ${displayDate(data.forecast)} to finish the remaining checklist items.", color = Palette.text); Body("An approximate forecast from the last 28 days of closing dates. It estimates coverage, not mastery.") } }
             item { Body("Completion metrics use current closing dates. Reopening an item removes its closing date; no invented event history is used.") }
         }
     }
@@ -242,8 +244,9 @@ class InsightMetrics(w: Workspace, period: Int) {
 @Composable fun PlanScreen(w: Workspace, vm: NativeViewModel) {
     LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageHeading("A direction, not a deadline", "Make space for what’s next.", "Your exams, weekly intentions, and moments to reflect.") }
-        item { Action("Add an exam", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } }
-        items(w.state.exams.sortedBy { it.date }, key = { "exam-${it.id}" }, contentType = { "exam" }) { exam -> Card(Modifier.clickable { vm.open(Editor.ExamForm(exam)) }, title = exam.name, subtitle = displayDate(exam.date)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${dayDifference(w.day, exam.date).coerceAtLeast(0)} days", fontFamily = Serif, fontSize = 28.sp, color = Palette.sage); Body(if (exam.archived) "Archived" else "${formatScore(exam.weeklyTarget)}h / week") }; if (exam.description.orEmpty().isNotBlank()) Body(exam.description.orEmpty()); Action("Open workspace", secondary = true) { vm.select(exam.id); vm.screen.value = Screen.TODAY } } }
+        item { Action("Add a study goal", icon = Icons.Outlined.Add) { vm.open(Editor.ExamForm()) } }
+        items(w.state.exams.sortedBy { it.date }, key = { "exam-${it.id}" }, contentType = { "exam" }) { exam -> Card(Modifier.clickable { vm.open(Editor.ExamForm(exam)) }, title = exam.name, subtitle = displayDate(exam.date)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(if(exam.date.isBlank()) "Open-ended" else "${dayDifference(w.day, exam.date).coerceAtLeast(0)} days", fontFamily = Serif, fontSize = 28.sp, color = Palette.sage); Body(if (exam.archived) "Archived" else "${formatScore(exam.weeklyTarget)}h / week") }; if (exam.description.orEmpty().isNotBlank()) Body(exam.description.orEmpty()); Action("Open workspace", secondary = true) { vm.select(exam.id); vm.screen.value = Screen.PLAN } } }
+        item { AutoPlanner(w, vm) }
         item { LectureCalendar(w, vm) }
         item { SectionTitle("Your detailed study plan", "Dated blocks, clear goals and time to work.") }
         item { Action("Create detailed plan", icon = Icons.Outlined.Add, enabled = w.examId != null) { vm.open(Editor.TaskForm(type = "plan")) } }
@@ -279,7 +282,7 @@ class InsightMetrics(w: Workspace, period: Int) {
     var exportType by remember { mutableStateOf("backup") }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> if (uri != null) vm.perform(false) { val source = vm.repo.backup(); withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(source.toByteArray()) } ?: error("Could not write this document.") }; vm.repo.messages.emit("Backup exported") } }
     val csvExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> if (uri != null) vm.perform(false) {
-        val source = withContext(Dispatchers.Default) { if (exportType == "sessions") csv(listOf(listOf("Date", "Exam", "Topic", "Minutes", "Activity", "Note")) + w.state.sessions.map { listOf(it.date, w.state.exams.firstOrNull { exam -> exam.id == it.examId }?.name, it.topicPath, it.minutes, it.activity, it.note) }) else csv(listOf(listOf("Date", "Exam", "Name", "Series", "Score", "Maximum", "Minutes")) + w.state.mocks.map { listOf(it.date, w.state.exams.firstOrNull { exam -> exam.id == it.examId }?.name, it.name, it.series, it.score, it.maximum, it.minutes) }) }
+        val source = withContext(Dispatchers.Default) { if (exportType == "sessions") csv(listOf(listOf("Date", "Exam", "Topic", "Minutes", "Activity", "Note", "Lectures", "Correct", "Incorrect", "Skipped")) + w.state.sessions.map { listOf(it.date, w.state.exams.firstOrNull { exam -> exam.id == it.examId }?.name, it.topicPath, it.minutes, it.activity, it.note, it.lectureIds.joinToString(" "), it.practice?.correct, it.practice?.incorrect, it.practice?.skipped) }) else csv(listOf(listOf("Date", "Exam", "Name", "Series", "Score", "Maximum", "Minutes")) + w.state.mocks.map { listOf(it.date, w.state.exams.firstOrNull { exam -> exam.id == it.examId }?.name, it.name, it.series, it.score, it.maximum, it.minutes) }) }
         withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(source.toByteArray()) } ?: error("Could not write this document.") }; vm.repo.messages.emit("CSV exported")
     } }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.perform(false) {

@@ -79,9 +79,9 @@ jobs:
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
             gh release upload android-latest build/studyspace-android.apk --clobber
             gh release upload android-latest build/android-release.json --clobber
-            gh release edit android-latest --title "Studyspace Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
+            gh release edit android-latest --title "Study Tracker Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
           else
-            gh release create android-latest build/studyspace-android.apk build/android-release.json --target "$GITHUB_SHA" --title "Studyspace Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
+            gh release create android-latest build/studyspace-android.apk build/android-release.json --target "$GITHUB_SHA" --title "Study Tracker Android 2.0.$GITHUB_RUN_NUMBER" --notes-file build/release-notes.txt --prerelease
           fi
       - name: Remove runner signing key
         if: always()

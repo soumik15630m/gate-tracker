@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { applyMutations, emptyState, list, reconcile, type Conflict, type LocalState, type Mutation, type Preferences, type SyncResult } from './core/model';
 import { sampleState } from './core/sample';
+import { scheduledMutations } from './core/planning';
 import { validateBackup, validateEntity, validateRelationships } from '../shared/validation.mjs';
 interface Account { token: string; user: { id: string; email: string }; server: string }
 interface Store {
@@ -46,8 +47,10 @@ export function StudyProvider({ children }: { children: ReactNode }) {
     if (storageBlocked.current) throw new Error('Your original cache is preserved. Restore a backup or explicitly start fresh before editing.');
     for (const mutation of mutations) if (!validateEntity(mutation.kind, mutation.data)) throw new Error('Some fields are invalid. Check your dates, duration, and required values.');
     const before = dataRef.current;
+    mutations = scheduledMutations(before, mutations);
     const next = applyMutations(before, mutations, !!accountRef.current);
     validateRelationships(Object.values(next.records));
+    if(Object.values(next.records).filter(r=>!r.deleted).length>20000) throw Error('A workspace supports up to 20,000 records. Shorten the planning window or disable automatic scheduling for some subjects.');
     undoRef.current = mutations.map(m => before.records[m.data.id] ? { kind: before.records[m.data.id].kind, data: before.records[m.data.id].data, deleted: before.records[m.data.id].deleted } : { ...m, deleted: true });
     update(() => next); if (message) notify(message); setError('');
   }, [notify, update]);

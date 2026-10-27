@@ -6,11 +6,11 @@ const configured = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 if (projectId && !configured) throw new Error('EAS_PROJECT_ID must be a valid Expo project UUID.');
 export default {
   expo: {
-    name: 'Studyspace', slug: release.expoSlug, owner, version: '1.0.0',
+    name: 'Study Tracker', slug: release.expoSlug, owner, version: '1.0.0',
     platforms: ['android', 'web'], scheme: 'studyspace',
     userInterfaceStyle: 'dark', backgroundColor: '#000000',
     android: { package: 'org.studyspace.app', adaptiveIcon: { backgroundColor: '#000000' } },
-    web: { bundler: 'metro', name: 'Studyspace', description: 'A quieter space for meaningful progress.', output: 'single' },
+    web: { bundler: 'metro', name: 'Study Tracker', description: 'A quieter space for meaningful progress.', output: 'single' },
     androidStatusBar: { barStyle: 'light-content' },
     plugins: ['expo-font', 'expo-secure-store', ['./plugins/with-local-network.cjs', { allowHttp: process.env.STUDYSPACE_ALLOW_HTTP === '1' }]],
     runtimeVersion: { policy: 'fingerprint' },

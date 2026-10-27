@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
-@Serializable private data class TopicDraft(val id: String = uid("topic"), val title: String = "", val importance: Int? = null, val lectures: String = "", val tests: String = "")
+@Serializable private data class TopicDraft(val id: String = uid("topic"), val title: String = "", val importance: Int? = null, val lectures: String = "", val tests: String = "", val pace: String = "1", val mode: String = "daily")
 
 @Composable fun TopicBatchEditor(editor: Editor.TopicForm, w: Workspace, vm: NativeViewModel) {
     var exam by rememberSaveable { mutableStateOf(w.state.topics.firstOrNull { it.id == editor.parent }?.examId ?: w.examId.orEmpty()) }
@@ -30,7 +30,7 @@ import kotlinx.serialization.encodeToString
                 require(row.title.isNotBlank()) { "Give $noun ${i + 1} a name, or remove that row." }
                 val lectures = if (editor.parent == null) row.lectures.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole lecture count for subject ${i + 1}.") else null
                 val tests = if (editor.parent == null) row.tests.ifBlank { "0" }.toIntOrNull() ?: error("Use a whole test count for subject ${i + 1}.") else null
-                mutation("topic", Topic(row.id, exam, editor.parent, row.title.trim(), offset + i, lectureCount = lectures, testCount = tests, importance = row.importance))
+                mutation("topic", Topic(row.id, exam, editor.parent, row.title.trim(), offset + i, lectureCount = lectures, testCount = tests, importance = row.importance, schedulePace=if(editor.parent==null) row.pace.toIntOrNull() ?: error("Enter a whole lecture pace.") else null,paceMode=row.mode))
             }.toMutableList()
             state.topics.firstOrNull { it.id == editor.parent }?.let { changes.add(mutation("topic", it.copy(completedOn = null))) }
             changes
@@ -38,7 +38,7 @@ import kotlinx.serialization.encodeToString
     }
     EditorFrame(if (parent == null) "Add subjects." else "Add child topics.", vm, "Save all / ${rows.size}", onSave = ::saveAll) {
         if (editor.parent == null) ExamChoice(w, exam) { exam = it }
-        Body(if (parent == null) "Add rows for separate subjects, then save them together. Enter saves the list." else "All rows become children of ${parent.title}. Keep names visible while adding more rows; Save all or Enter creates them together.")
+        Body(if (parent == null) "New subjects start at 1 lecture per study day; adjust in subject details or Plan. Add rows for separate subjects, then save them together. Enter saves the list." else "All rows become children of ${parent.title}. Keep names visible while adding more rows; Save all or Enter creates them together.")
         rows.forEachIndexed { index, row -> key(row.id) {
             Card {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -49,6 +49,7 @@ import kotlinx.serialization.encodeToString
                 }
                 Field(if (index == 0) "Topic title" else "Topic title ${index + 1}", row.title, { title -> update(row.id) { it.copy(title = title) } }, autoFocus = row.id == active, focusKey = active, onSubmit = ::saveAll)
                 ImportancePicker(row.importance) { importance -> update(row.id) { it.copy(importance = importance) } }
+                if (editor.parent == null) PaceFields(row.pace,row.mode,{value -> update(row.id) { it.copy(pace=value) }},{value -> update(row.id) { it.copy(mode=value) }})
                 if (editor.parent == null) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Field("Lecture count", row.lectures, { value -> update(row.id) { it.copy(lectures = value) } }, Modifier.weight(1f), numeric = true)
                     Field("Test count", row.tests, { value -> update(row.id) { it.copy(tests = value) } }, Modifier.weight(1f), numeric = true)

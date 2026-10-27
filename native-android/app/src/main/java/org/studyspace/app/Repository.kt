@@ -124,7 +124,8 @@ class StudyRepository(private val context: Context, private val backgroundSync: 
         messages.tryEmit(message); scheduleSync()
     }
     suspend fun commit(changes: List<Mutation>, message: String = "Saved", expectedScope: String? = null) = edit(message, expectedScope) { changes }
-    private suspend fun commitLocked(key: String, before: List<WireRecord>, changes: List<Mutation>, rememberUndo: Boolean) {
+    private suspend fun commitLocked(key: String, before: List<WireRecord>, requestedChanges: List<Mutation>, rememberUndo: Boolean) {
+        val changes = if (rememberUndo) scheduledChanges(before, requestedChanges) else requestedChanges
         require(changes.map { it.id }.distinct().size == changes.size) { "The change contains duplicate records." }
         changes.forEach { validate(it.kind, it.data) }
         val original = before.associateBy { it.id }

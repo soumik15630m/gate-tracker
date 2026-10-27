@@ -32,7 +32,7 @@ export default function Syllabus() {
     return rows;
   }, [topics, searchIndex, collapsed, settledSearch, filter]);
 
-  if (!exam) return <Empty title="Choose an exam workspace" description="Each exam has its own syllabus. Select one to organise its subjects and topics." action={w.exams[0] ? <Button label={`Open ${w.exams[0].name}`} onPress={() => w.setExamId(w.exams[0].id)} /> : <Button label="Add an exam" onPress={() => w.openExam()} />} />;
+  if (!exam) return <Empty title="Choose a study workspace" description="Each study goal has its own syllabus. Select one to organise its subjects and topics." action={w.exams[0] ? <Button label={`Open ${w.exams[0].name}`} onPress={() => w.setExamId(w.exams[0].id)} /> : <Button label="Add a study goal" onPress={() => w.openExam()} />} />;
   function openEditor(mode: 'add' | 'rename' | 'move', topic?: Topic, parentId?: string | null) { setEditor({ mode, topic, parentId }); setTitle(mode === 'rename' ? topic!.title : ''); setImportance(topic?.importance ?? null); setParent(topic?.parentId || ''); setError(''); }
   function toggle(topic: Topic) { w.completeTopic(topic.id); }
   function saveEditor() { try {

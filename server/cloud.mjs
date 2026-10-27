@@ -1,3 +1,4 @@
+import { buildSchedule } from '../shared/planner.mjs';
 import pg from 'pg';
 import { unpackTimer, timerReply, transitionTimer, timerLogWrites } from './timer.mjs';
 import { attachDatabasePool } from '@vercel/functions';
@@ -159,10 +160,7 @@ export function createCloudHandler(options = {}) {
         if (!user) throw fail(401, 'Sign in again to continue syncing.');
         let revision = user.revision;
         if (input.cursor > revision) throw fail(409, 'The sync cursor is ahead of this server. Reconnect to the original server.');
-        if (!input.changes.length) {
-          const records = (await client.query('SELECT * FROM records WHERE user_id=$1 AND version>$2 ORDER BY version', [session.user_id, input.cursor])).rows.map(unpack);
-          result = { cursor: revision, records, accepted: [], conflicts: [] };
-        } else {
+        {
           const existing = new Map((await client.query('SELECT * FROM records WHERE user_id=$1', [session.user_id])).rows.map(row => [row.id, unpack(row)]));
           const receipts = new Map((await client.query('SELECT * FROM receipts WHERE user_id=$1 AND mutation_id=ANY($2::text[])', [session.user_id, input.changes.map(change => change.mutationId)])).rows.map(row => [row.mutation_id, row]));
           for (const change of input.changes) if (receipts.has(change.mutationId) && receipts.get(change.mutationId).record_id !== change.id) throw fail(400, 'Mutation ID was reused for a different record.');
@@ -182,6 +180,15 @@ export function createCloudHandler(options = {}) {
               writes.push({ ...record, data: JSON.stringify(record.data), deleted: record.deleted ? 1 : 0, changed_at: changedAt });
               newReceipts.push({ mutation_id: change.mutationId, record_id: change.id, version: revision });
               accepted.push({ id: change.id, mutationId: change.mutationId, version: revision });
+            }
+            const timezone = [...existing.values()].find(r => !r.deleted && r.kind === 'preferences')?.data.timezone || 'UTC';
+            const today = new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+            for (const change of buildSchedule([...existing.values()],today).writes) {
+              revision++;
+              const record = {id:change.data.id,kind:change.kind,data:change.data,deleted:!!change.deleted,version:revision,changedAt};
+              existing.set(record.id,record);
+              const index = writes.findIndex(w => w.id === record.id); if(index >= 0) writes.splice(index,1);
+              writes.push({...record,data:JSON.stringify(record.data),deleted:record.deleted ? 1 : 0,changed_at:changedAt});
             }
             try { validateRelationships([...existing.values()]); } catch (error) { throw fail(400, error.message); }
             if ([...existing.values()].filter(record => !record.deleted).length > 20000) throw fail(400, 'A workspace supports up to 20,000 records.');

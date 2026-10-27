@@ -76,12 +76,12 @@ class SharedNativeStopwatch(context: Context, private val repo: StudyRepository)
             }
         }
     }
-    suspend fun command(action: String, expected: SharedTimerState = state.value ?: kotlin.error("Connect the stopwatch first."), entry: StudySession? = null): SharedTimerState {
+    suspend fun command(action: String, expected: SharedTimerState = state.value ?: kotlin.error("Connect the stopwatch first."), entry: StudySession? = null, reviewOn: String? = null): SharedTimerState {
         busy.value = true
         try {
             return requests.withLock {
                 val account = auth ?: kotlin.error("Sign in to control your shared timer.")
-                send(account, buildJsonObject { put("action", action); put("version", expected.version); put("device", "Android"); expected.timer?.let { put("id", it.id) }; entry?.let { put("entry", jsonOf(it)) } })
+                send(account, buildJsonObject { put("action", action); put("version", expected.version); put("device", "Android"); expected.timer?.let { put("id", it.id) }; entry?.let { put("entry", jsonOf(it)) }; reviewOn?.let { put("review",buildJsonObject { put("reviewOn",it) }) } })
             }
         } finally { busy.value = false }
     }

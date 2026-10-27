@@ -1,6 +1,6 @@
 {
-  "name": "Studyspace",
-  "short_name": "Studyspace",
+  "name": "Study Tracker",
+  "short_name": "Study Tracker",
   "description": "Your own pace. Your own progress.",
   "start_url": "/",
   "display": "standalone",

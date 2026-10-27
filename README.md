@@ -1,4 +1,4 @@
-# Studyspace
+# Study Tracker
 
 A personal exam-preparation workspace for **native Android and desktop web**. Android is Kotlin + Jetpack Compose with Room storage; desktop web uses React Native Web / Expo and TypeScript. Both clients use the same Node.js + SQLite sync API and JSON backup format. OLED black, muted sage controls, teal analytics and gold streaks. Apache-2.0 licensed.
 
@@ -172,3 +172,20 @@ npm run test:android
 ```
 
 `native-android/app/src/main/java/org/studyspace/app/` contains native UI, domain rules, Room storage, sync and the signed updater. `src/` contains the desktop web client; `shared/validation.mjs` defines the server record contract; `server/index.mjs` implements authentication, sync and web hosting. `tests/` covers web domain behavior and API authentication, isolation, idempotency, conflicts, rollback and logout. Native font licenses are in `native-android/licenses/`.
+
+
+## Automatic study planning
+
+Workspaces can represent exams, semesters, courses or personal learning. Deadlines are optional. Undated goals need a planner end date before automatic lecture targets can be generated.
+
+Set each subject's lecture pace in Syllabus or Plan. Daily pace applies on the selected study weekdays; weekly pace is spread over eligible days. New-subject forms include this choice and default to one lecture per study day, Monday–Saturday. A pace of zero disables automatic scheduling. Plan also supports rest dates and an optional combined daily lecture limit.
+
+Saving lecture totals, pacing or deadlines automatically rebuilds future editable targets. Known totals schedule only remaining lectures, using unique credits from topic progress and study logs. Unset/zero totals continue through the exam deadline or earlier planner end. Scheduling windows are limited to two years. Capacity shortfalls and overbooked protected targets are shown explicitly. Past days, days with lecture logs, and locked/manual targets are preserved. Editing a daily target locks it. Removing an automatic day makes it a rest day for that workspace.
+
+Catch-up reserves and locks available slots in a chosen future window without changing the main deadline. Original missed targets and partial carry counts remain visible. Work that cannot fit remains overdue; carried work is excluded from reminders on its original day.
+
+Today combines daily lecture targets, revision and timed study blocks. Optional question-practice counts (correct, incorrect, skipped) can be recorded against any syllabus level while logging time. Attempted questions are correct plus incorrect; accuracy excludes skipped questions. CSV and JSON exports include these new fields. Insights compares planned lectures and time with actual effort, reports practice accuracy, and highlights important topics that still need confidence using independent importance filters.
+
+Lecture forecasts use the last 28 calendar days of unique logged lectures and appear after at least three logged lectures with a known subject total. Checklist coverage, confidence and practice accuracy remain separate.
+
+This release adds fields to existing JSON records. It does not reset caches, migrate Room tables, rename the Android application ID, change account scope or replace signing certificates. Existing backup format identifiers and server URLs remain compatible. Install the new APK over the existing app; do not uninstall to update.

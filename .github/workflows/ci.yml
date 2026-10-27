@@ -49,3 +49,55 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon
         working-directory: native-android
+  android-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci --no-audit --no-fund
+      - name: Prepare disposable Android 16 device
+        shell: bash
+        run: |
+          sudo chmod 666 /dev/kvm
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' emulator 'system-images;android-36;google_apis;x86_64'
+          echo no | avdmanager create avd --force --name study-tracker-ci --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          mkdir -p signing build
+          keytool -genkeypair -keystore signing/development.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable UI Test'
+          chmod +x native-android/gradlew
+      - name: Exercise native forms, planner, notifications and shared sync
+        shell: bash
+        run: |
+          node scripts/native-test-server.mjs > build/ui-test-api.log 2>&1 &
+          api_pid=$!
+          "$ANDROID_HOME/emulator/emulator" -avd study-tracker-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > build/ui-test-emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$api_pid" "$emulator_pid" 2>/dev/null || true' EXIT
+          adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          cd native-android
+          ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.syncServer=http://10.0.2.2:3137 --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-ui-results
+          path: |
+            native-android/app/build/reports/androidTests/
+            native-android/app/build/outputs/androidTest-results/
+            build/ui-test-*.log
+          retention-days: 14

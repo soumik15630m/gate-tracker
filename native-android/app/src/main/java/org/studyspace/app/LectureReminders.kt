@@ -28,9 +28,9 @@ fun scheduleLectureReminders(context: Context) {
 }
 
 data class MissingLectureDay(val date: String, val subject: String, val remaining: Int)
-fun missingLectureDays(state: StudySnapshot, day: String, includeToday: Boolean): List<MissingLectureDay> = state.tasks.filter { it.lectureTarget != null && (it.date < day || includeToday && it.date == day) }.mapNotNull { plan ->
+fun missingLectureDays(state: StudySnapshot, day: String, includeToday: Boolean): List<MissingLectureDay> = state.tasks.filter { it.lectureTarget != null && it.carriedOn == null && (it.date < day || includeToday && it.date == day) }.mapNotNull { plan ->
     val subject = state.topics.firstOrNull { it.id == plan.topicId && it.parentId == null } ?: return@mapNotNull null
-    val remaining = ((plan.lectureTarget ?: 0) - lectureDay(state.sessions, subject.id, plan.date)).coerceAtLeast(0)
+    val remaining = ((plan.lectureTarget ?: 0) - lectureDay(state.sessions, subject.id, plan.date) - (plan.carriedCount ?: 0)).coerceAtLeast(0)
     if (remaining == 0) null else MissingLectureDay(plan.date, subject.title, remaining)
 }
 

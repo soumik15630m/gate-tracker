@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { validateEntity, validateRelationships } from '../shared/validation.mjs';
+import { buildSchedule } from '../shared/planner.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export const emptyTimerState = () => ({ version: 0, timer: null, lastSavedId: null });
@@ -61,6 +62,9 @@ export function timerLogWrites(input, records) {
     writes.push({ id: topic.id, kind: 'topic', data, deleted: false });
   }
   for (const write of writes) byId.set(write.id, write);
+  const timezone = [...byId.values()].find(r => !r.deleted && r.kind === 'preferences')?.data.timezone || 'UTC';
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+  for (const change of buildSchedule([...byId.values()],today).writes) { const write = { ...change, id:change.data.id, deleted:!!change.deleted }; writes.push(write); byId.set(write.id,write); }
   if ([...byId.values()].filter(record => !record.deleted).length > 20000) throw fail(400, 'A workspace supports up to 20,000 records.');
   try { validateRelationships([...byId.values()]); } catch (error) { throw fail(400, error.message); }
   return writes;

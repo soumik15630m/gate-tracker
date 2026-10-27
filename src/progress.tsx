@@ -3,6 +3,7 @@ import { FlatList, Pressable, View } from 'react-native';
 import { Button, C, DateField, Dialog, Input, Meter, Select, T, s } from './ui';
 import { useStudy } from './store';
 import { useWorkspace } from './workspace';
+import { PaceFields } from './AutoPlanner';
 import { TopicFilterControls } from './importance';
 import { TopicAutocomplete } from './TopicAutocomplete';
 import type { TopicFilter } from './core/search';
@@ -18,12 +19,13 @@ export function ContentMeters({ topic, topics }: { topic: Topic; topics: Topic[]
 }
 export function SubjectCounts({ topic }: { topic: Topic }) {
   const store = useStudy(), w = useWorkspace();
+  const [pace,setPace] = useState(String(topic.schedulePace ?? 1)), [mode,setMode] = useState(topic.paceMode || 'daily');
   const [lectures, setLectures] = useState(String(topic.lectureCount || '')), [tests, setTests] = useState(String(topic.testCount || ''));
-  return <View><T muted style={{ marginBottom: 14 }}>Subject totals</T><View style={s.columns}><View style={{ flex: 1 }}><Input label="Lecture count" numeric value={lectures} onChange={setLectures} /></View><View style={{ flex: 1 }}><Input label="Test count" numeric value={tests} onChange={setTests} /></View></View><Button small kind="secondary" label="Save subject totals" onPress={() => {
+  return <View><T muted style={{ marginBottom: 14 }}>Subject totals</T><View style={s.columns}><View style={{ flex: 1 }}><Input label="Lecture count" numeric value={lectures} onChange={setLectures} /></View><View style={{ flex: 1 }}><Input label="Test count" numeric value={tests} onChange={setTests} /></View></View><PaceFields pace={pace} mode={mode} onPace={setPace} onMode={v=>setMode(v as 'daily'|'weekly')} /><Button small kind="secondary" label="Save subject totals" onPress={() => {
     const lectureCount = Number(lectures || 0), testCount = Number(tests || 0), used = contentProgress(w.topics, topic.id);
     if (![lectureCount, testCount].every(n => Number.isInteger(n) && n >= 0 && n <= 10000)) return store.notify('Use whole counts between 0 and 10,000.');
     if ([...used.lectures].some(n => n > lectureCount) || [...used.tests].some(n => n > testCount)) return store.notify('Totals must include your already recorded lecture and test numbers.');
-    store.commit([{ kind: 'topic', data: { ...topic, lectureCount, testCount } }], 'Subject totals saved.');
+    store.commit([{ kind: 'topic', data: { ...topic, lectureCount, testCount, schedulePace:Number(pace), paceMode:mode } }], 'Subject totals saved. Future schedule updated automatically.');
   }} /></View>;
 }
 export function CompletionForm({ topicId, recordOnly = false, onClose }: { topicId: string; recordOnly?: boolean; onClose: () => void }) {
