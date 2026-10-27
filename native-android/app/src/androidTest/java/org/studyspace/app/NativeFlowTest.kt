@@ -4,6 +4,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -247,7 +248,7 @@ class NativeFlowTest {
         }
         compose.runOnIdle { vm.screen.value=Screen.PLAN }
         compose.onNodeWithTag("Plan content").performScrollToNode(hasText("Scheduling preferences"))
-        compose.onNodeWithText("Scheduling preferences").performScrollTo().performClick()
+        compose.onNodeWithText("Scheduling preferences").performScrollTo().performSemanticsAction(SemanticsActions.OnClick) { it() }
         settled { vm.plannerDialog.value?.examId==exam.id }
         settled { compose.onAllNodesWithTag("Scheduling subjects").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("Scheduling subjects").performScrollToIndex(5000)

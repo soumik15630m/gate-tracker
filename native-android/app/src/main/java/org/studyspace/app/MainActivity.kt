@@ -158,14 +158,21 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     val account by vm.repo.account.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current
-    LaunchedEffect(vm) { vm.repo.messages.collect { snack.showSnackbar(it) } }
+    LaunchedEffect(vm) { vm.repo.messages.collectLatest { snack.showSnackbar(it) } }
     LaunchedEffect(vm, lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             vm.repo.sync()
             while (true) { delay(15000); vm.repo.sync() }
         }
     }
-    LaunchedEffect(vm) { vm.updater.checkIfDue() }
+    LaunchedEffect(vm,lifecycle) {
+        if(!BuildConfig.DEBUG) lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            vm.updater.resumeInstallation()
+            vm.updater.checkIfDue()
+            while(true) { delay(60000); vm.updater.checkIfDue() }
+        }
+    }
+    NativeUpdateToast(vm,snack,editor==null)
     TimerNotificationBridge(vm)
     TimerFocusDialog(vm)
     BackHandler(editor != null || route != Screen.TODAY) { if (editor != null) vm.dismiss() else vm.screen.value = Screen.TODAY }
@@ -184,6 +191,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
                 Chip("SAMPLE WORKSPACE", selected = true); Spacer(Modifier.width(10.dp)); Body("Start fresh in Settings", Modifier.clickable { vm.screen.value = Screen.SETTINGS })
             }
             if (failure.isNotBlank()) Row(Modifier.fillMaxWidth().background(Palette.danger.copy(alpha = .08f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) { Body(failure, Modifier.weight(1f), Palette.danger, 3); IconAction("Dismiss message", Icons.Outlined.Close) { vm.repo.error.value = "" } }
+            NativeUpdateBanner(vm)
             StudyStopwatch(vm)
             Box(Modifier.weight(1f).imePadding()) {
                 when (route) {

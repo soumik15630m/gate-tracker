@@ -18,25 +18,23 @@ import java.net.URL
 import java.security.MessageDigest
 
 @Serializable data class ReleaseManifest(val versionCode: Int, val versionName: String, val sha256: String, val apkUrl: String, val notes: String = "")
-data class AppUpdateState(val checking: Boolean = false, val progress: Int? = null, val release: ReleaseManifest? = null, val verifiedApk: File? = null, val message: String = "Updates are checked daily. Installation always asks your permission.")
+data class AppUpdateState(val checking: Boolean = false, val progress: Int? = null, val release: ReleaseManifest? = null, val verifiedApk: File? = null, val message: String = "Updates are checked on launch and every five minutes while the app is open. Installation always asks your permission.")
 
 class NativeUpdater(private val context: Context) {
     private val preferences = context.getSharedPreferences("native_updates", 0)
     val state = MutableStateFlow(AppUpdateState())
-    suspend fun checkIfDue() { if (System.currentTimeMillis() - preferences.getLong("checked", 0) > 24 * 60 * 60 * 1000) check() }
+    private var awaitingInstall = false
+    suspend fun checkIfDue() { if (System.currentTimeMillis() - preferences.getLong("checked", 0) > 5 * 60 * 1000) check() }
     suspend fun check() = withContext(Dispatchers.IO) {
-        if (state.value.checking) return@withContext
+        if (state.value.checking || state.value.progress!=null) return@withContext
         state.value = state.value.copy(checking = true, message = "Checking GitHub for a signed native release…")
         try {
-            val json = codec.parseToJsonElement(readHttps("https://api.github.com/repos/soumik15630m/gate-tracker/releases/tags/android-latest")).jsonObject
-            val asset = json["assets"]?.jsonArray?.firstOrNull { it.jsonObject["name"]?.jsonPrimitive?.content == "android-release.json" }?.jsonObject
-            if (asset == null) { state.value = AppUpdateState(message = "No native update is available yet."); return@withContext }
-            val manifest = codec.decodeFromString<ReleaseManifest>(readHttps(asset.getValue("browser_download_url").jsonPrimitive.content))
+            val manifest = codec.decodeFromString<ReleaseManifest>(readHttps("https://github.com/soumik15630m/gate-tracker/releases/download/android-latest/android-release.json?check=${System.currentTimeMillis()/300000}"))
             require(manifest.sha256.matches(Regex("[a-fA-F0-9]{64}"))) { "The update checksum is missing." }
             require(manifest.apkUrl.startsWith("https://github.com/soumik15630m/gate-tracker/releases/download/")) { "The release has an unexpected download address." }
             preferences.edit().putLong("checked", System.currentTimeMillis()).apply()
-            state.value = if (manifest.versionCode > BuildConfig.VERSION_CODE) AppUpdateState(release = manifest, message = "Version ${manifest.versionName} is available. Your study data stays on this device.") else AppUpdateState(message = "You’re using the latest native release.")
-        } catch (_: Exception) { state.value = AppUpdateState(message = "Could not check for updates. Your installed app works offline.") }
+            state.value = if (manifest.versionCode > BuildConfig.VERSION_CODE) if(state.value.release?.versionCode==manifest.versionCode) state.value.copy(checking=false,release=manifest) else AppUpdateState(release = manifest, message = "Version ${manifest.versionName} is available. Your study data stays on this device.") else AppUpdateState(message = "You’re using the latest native release.")
+        } catch (_: Exception) { state.value = state.value.copy(checking=false,message = "Could not check for updates. Your installed app works offline.") }
     }
     suspend fun download() = withContext(Dispatchers.IO) {
         val release = state.value.release ?: return@withContext
@@ -81,12 +79,21 @@ class NativeUpdater(private val context: Context) {
     fun install() {
         val file = state.value.verifiedApk ?: return
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
+            awaitingInstall=true
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             state.value = state.value.copy(message = "Allow Study Tracker to request installation, then return and tap Install verified update.")
             return
         }
+        awaitingInstall=false
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
         context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+    suspend fun updateNow() {
+        if(state.value.verifiedApk==null) download()
+        if(state.value.verifiedApk!=null) withContext(Dispatchers.Main) { install() }
+    }
+    fun resumeInstallation() {
+        if(awaitingInstall && state.value.verifiedApk?.exists()==true && (Build.VERSION.SDK_INT<26 || context.packageManager.canRequestPackageInstalls())) install()
     }
     private fun readHttps(address: String): String {
         val connection = connect(address)

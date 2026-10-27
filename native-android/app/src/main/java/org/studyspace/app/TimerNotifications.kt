@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -20,9 +22,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 
 const val TIMER_NOTIFICATION_ID = 9401
-const val TIMER_CHANNEL = "study_stopwatch"
+const val TIMER_CHANNEL = "study_stopwatch_live_v2"
 fun notificationSettings(context: Context) = context.getSharedPreferences("notification_options", Context.MODE_PRIVATE)
 fun notificationsAllowed(context: Context) = (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) && NotificationManagerCompat.from(context).areNotificationsEnabled()
 fun postStudyNotification(context: Context, id: Int, notification: android.app.Notification): Boolean = try {
@@ -34,12 +38,12 @@ fun timerActivityIntent(context: Context, action: String, id: String, scope: Str
 }
 fun timerNotification(context: Context, timer: StudyTimer?, scope: String, offset: Long, failure: String? = null): android.app.Notification {
     val manager = context.getSystemService(NotificationManager::class.java)
-    if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(TIMER_CHANNEL, "Study stopwatch", NotificationManager.IMPORTANCE_LOW).apply { description = "Your stopwatch and pause, resume, finish controls"; setSound(null, null) })
+    if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(TIMER_CHANNEL, "Live study stopwatch", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Quiet live stopwatch with lock-screen controls"; setSound(null, null); enableVibration(false); setShowBadge(false); lockscreenVisibility=android.app.Notification.VISIBILITY_PUBLIC })
     val visible = notificationSettings(context).getBoolean("timer_lock_screen", true)
     val id = timer?.id.orEmpty(); val open = PendingIntent.getActivity(context, 101, timerActivityIntent(context, "focus", id, scope), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val builder = NotificationCompat.Builder(context, TIMER_CHANNEL).setSmallIcon(R.drawable.ic_timer_notification).setContentTitle(if (timer == null) "Connecting your study stopwatch" else if (timer.startedAt == null) "Study stopwatch paused" else "Your focus is adding up")
         .setContentText(failure ?: timer?.let { if (it.startedAt == null) timerClock(it.elapsed(System.currentTimeMillis() + offset)) else "Started on ${it.origin ?: "this device"} · a little further, every day" } ?: "Restoring your active timer")
-        .setContentIntent(open).setOnlyAlertOnce(true).setOngoing(true).setCategory(NotificationCompat.CATEGORY_STOPWATCH).setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        .setContentIntent(open).setPriority(NotificationCompat.PRIORITY_DEFAULT).setOnlyAlertOnce(true).setOngoing(true).setCategory(NotificationCompat.CATEGORY_STOPWATCH).setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         .setVisibility(if (visible) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_SECRET)
     if (timer != null) {
         val running = timer.startedAt != null
@@ -50,12 +54,19 @@ fun timerNotification(context: Context, timer: StudyTimer?, scope: String, offse
         builder.addAction(if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (running) "Pause" else "Resume", pending)
         builder.addAction(android.R.drawable.ic_menu_save, "Finish & log", PendingIntent.getActivity(context, 103, timerActivityIntent(context, "finish", id, scope), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
     }
+    if(visible) builder.setPublicVersion(builder.build())
     return builder.build()
 }
 
 class TimerNotificationService : Service() {
     private val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watch: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private fun keepSharedTimerAwake() {
+        val lock=wakeLock ?: (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"StudyTracker:SharedTimer").also { wakeLock=it }
+        if(!lock.isHeld) lock.acquire(10*60*1000L)
+    }
+    private fun releaseWakeLock() { wakeLock?.let { if(it.isHeld) it.release() }; wakeLock=null }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = application as StudyspaceApplication
@@ -79,22 +90,36 @@ class TimerNotificationService : Service() {
         if (watch?.isActive != true) watch = jobs.launch {
             app.repository.ready.first { it }
             val owner = app.repository.account.value?.scope() ?: "local"
-            while (isActive && notificationSettings(this@TimerNotificationService).getBoolean("timer_enabled", false) && notificationsAllowed(this@TimerNotificationService)) {
-                val auth = app.repository.account.value
-                if ((auth?.scope() ?: "local") != owner) break
-                if (auth != null) { app.sharedStopwatch.connect(auth); try { app.sharedStopwatch.poll() } catch (_: Exception) {} }
-                val timer = if (auth == null) app.stopwatch.timer.value else app.sharedStopwatch.state.value?.timer
-                if (timer == null) break
-                val failure = if (auth != null && !app.sharedStopwatch.connected.value) "Reconnecting · open the app to retry controls" else null
-                val offset = if (auth == null) 0 else app.sharedStopwatch.clockOffset.value
-                postStudyNotification(this@TimerNotificationService, TIMER_NOTIFICATION_ID, timerNotification(this@TimerNotificationService, timer, owner, offset, failure))
-                delay(5000)
+            val observer=launch {
+                combine(app.stopwatch.timer,app.sharedStopwatch.state,app.sharedStopwatch.clockOffset,app.sharedStopwatch.connected) { local,shared,offset,connected ->
+                    val account=app.repository.account.value
+                    val timer=if(account==null) local else shared?.timer
+                    Triple(timer,if(account==null) 0L else offset,account!=null && !connected)
+                }.collect { (timer,offset,offline) ->
+                    if(timer!=null && (app.repository.account.value?.scope() ?: "local")==owner && notificationsAllowed(this@TimerNotificationService)) postStudyNotification(this@TimerNotificationService,TIMER_NOTIFICATION_ID,timerNotification(this@TimerNotificationService,timer,owner,offset,if(offline) "Reconnecting to your shared timer" else null))
+                }
             }
-            stopSelf()
+            try {
+                while (isActive && notificationSettings(this@TimerNotificationService).getBoolean("timer_enabled", false) && notificationsAllowed(this@TimerNotificationService)) {
+                    val auth = app.repository.account.value
+                    if ((auth?.scope() ?: "local") != owner) break
+                    if(auth!=null) {
+                        keepSharedTimerAwake()
+                        app.sharedStopwatch.connect(auth)
+                        try { app.sharedStopwatch.poll() } catch(cancelled:CancellationException) { throw cancelled } catch (_: Exception) {}
+                    }
+                    val timer = if (auth == null) app.stopwatch.timer.value else app.sharedStopwatch.state.value?.timer
+                    if (timer == null) break
+                    if(timer.finished || auth==null) releaseWakeLock()
+                    val failure = if (auth != null && !app.sharedStopwatch.connected.value) "Reconnecting to your shared timer" else null
+                    postStudyNotification(this@TimerNotificationService, TIMER_NOTIFICATION_ID, timerNotification(this@TimerNotificationService, timer, owner, if(auth==null) 0 else app.sharedStopwatch.clockOffset.value, failure))
+                    delay(5000)
+                }
+            } finally { observer.cancel();releaseWakeLock();stopSelf() }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
-    override fun onDestroy() { jobs.cancel(); stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy() }
+    override fun onDestroy() { jobs.cancel(); releaseWakeLock(); stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy() }
 }
 
 @Composable fun TimerNotificationOption(vm: NativeViewModel) {
@@ -107,7 +132,12 @@ class TimerNotificationService : Service() {
     ToggleLine("Stopwatch notification & quick actions", enabled) { value -> if (value && Build.VERSION.SDK_INT >= 33 && !notificationsAllowed(context)) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else apply(value) }
     if (enabled) {
         ToggleLine("Show stopwatch on lock screen", locked) { locked = it; prefs.edit().putBoolean("timer_lock_screen", it).apply(); vm.notificationOptions.value++ }
-        Body("Pause or resume without opening the app. Finish & log opens your entry form. Your phone’s notification settings control lock-screen visibility.")
+        Body("The notification follows web pause/resume changes while this timer is active, including with the screen off. Finish & log opens your entry form.")
+        Action("Notification & lock-screen settings",secondary=true) {
+            val intent=if(Build.VERSION.SDK_INT>=26) Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName).putExtra(Settings.EXTRA_CHANNEL_ID,TIMER_CHANNEL) else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:${context.packageName}"))
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        Body("Enable lock-screen visibility in the phone’s notification settings. HyperOS may also require background activity to be allowed for Study Tracker.")
     }
 }
 

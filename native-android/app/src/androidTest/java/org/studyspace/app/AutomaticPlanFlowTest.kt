@@ -1,6 +1,7 @@
 package org.studyspace.app
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -57,7 +58,7 @@ class AutomaticPlanFlowTest {
         compose.onNodeWithText("Your daily agenda").assertExists()
         compose.runOnIdle { vm.screen.value=Screen.PLAN }
         compose.onNodeWithTag("Plan content").performScrollToNode(hasText("Scheduling preferences"))
-        compose.onNodeWithText("Scheduling preferences").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Scheduling preferences").performScrollTo().assertIsDisplayed().performSemanticsAction(SemanticsActions.OnClick) { it() }
         settled { vm.plannerDialog.value?.examId==exam.id }
         settled { compose.onAllNodesWithText("Your study rhythm").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Your study rhythm").assertExists()
