@@ -78,7 +78,7 @@ data class PlannerRequest(val examId: String, val catchUp: Boolean = false)
     var days by rememberSaveable { mutableStateOf(saved.weekdays.toSet()) }
     var rests by rememberSaveable { mutableStateOf(saved.restDates.joinToString(", ")) }
     var limit by rememberSaveable { mutableStateOf(saved.dailyLimit?.toString().orEmpty()) }
-    val roots=w.state.topics.filter { it.examId==exam.id && it.parentId==null }
+    val roots=w.state.topics.filter { it.examId==exam.id && it.parentId==null }.sortedWith(compareBy<Topic> { it.order }.thenBy { it.title })
     var paces by rememberSaveable { mutableStateOf(roots.associate { it.id to (it.schedulePace ?: 0).toString() }) }
     var modes by rememberSaveable { mutableStateOf(roots.associate { it.id to it.paceMode }) }
     Dialog(onClose,properties=DialogProperties(usePlatformDefaultWidth=false)) {
