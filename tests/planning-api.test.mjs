@@ -35,4 +35,14 @@ test('automatic scheduling, actual practice, legacy clients and separate account
   token=firstToken;assert.equal((await sync([])).body.records.find(r=>r.id===root.id).data.lectureCount,12);
   const rejected=await sync([change('topic',{...originalRoot.data,lectureCount:1},originalRoot.version)]);assert.equal(rejected.status,400);
   assert.equal((await sync([])).body.records.find(r=>r.id===root.id).data.lectureCount,12);
+  // Completing the rest today must persist removals of unneeded future automatic slots.
+  const timerState=(await post('/api/timer',{action:'read'})).body;
+  const again=(await post('/api/timer',{action:'start',version:timerState.version,device:'Web'})).body;
+  const finished=(await post('/api/timer',{action:'finish',version:again.version,id:again.timer.id,device:'Web'})).body;
+  const remaining={...entry,id:finished.timer.id,lectureIds:Array.from({length:10},(_,i)=>i+3)};
+  const completed=await post('/api/timer',{action:'log',id:remaining.id,version:finished.version,device:'Web',entry:remaining});
+  assert.equal(completed.status,200,JSON.stringify(completed.body));
+  const finalRecords=(await sync([])).body.records;
+  assert.ok(finalRecords.some(r=>r.kind==='task'&&r.deleted),'timer writes must persist automatic-plan tombstones');
+  assert.equal(finalRecords.filter(r=>r.kind==='task'&&!r.deleted&&r.data.date>day&&!r.data.locked).length,0);
 });
