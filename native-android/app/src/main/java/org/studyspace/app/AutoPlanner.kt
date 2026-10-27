@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,10 +20,6 @@ import kotlinx.coroutines.withContext
 }
 @Composable fun AutoPlanner(w: Workspace, vm: NativeViewModel) {
     val exam=w.exam ?: return
-    var settings by rememberSaveable { mutableStateOf(false) }
-    var catchUp by rememberSaveable { mutableStateOf(false) }
-    var start by rememberSaveable { mutableStateOf(w.day) }
-    var end by rememberSaveable { mutableStateOf(addDays(w.day,6)) }
     val roots=w.index.children[null].orEmpty()
     var forecastError by remember { mutableStateOf("") }
     val result by produceState<ScheduleResult?>(null,w) {
@@ -32,7 +29,7 @@ import kotlinx.coroutines.withContext
     val forecasts by produceState<Map<String,LectureForecast>>(emptyMap(),w) { value=withContext(Dispatchers.Default) { roots.associate { it.id to lectureForecast(it,w.state,w.day) } } }
     val missed=w.tasks.filter { it.lectureTarget!=null && it.date<w.day && !it.locked && it.carriedOn==null && lectureDay(w.sessions,it.topicId.orEmpty(),it.date)<it.lectureTarget }
     Card(title="Your automatic study plan",subtitle="Save lecture totals to update future calendar targets automatically.") {
-        Action("Scheduling preferences",secondary=true) { settings=true }
+        Action("Scheduling preferences",secondary=true) { vm.plannerDialog.value=PlannerRequest(exam.id) }
         if(forecastError.isNotBlank()) Body(forecastError,color=Palette.gold)
         roots.forEach { root ->
             val summary=result?.summaries?.firstOrNull { it.subjectId==root.id }; val forecast=forecasts[root.id]
@@ -45,20 +42,31 @@ import kotlinx.coroutines.withContext
             if ((summary?.remaining ?: 0)>0) Body("${summary?.remaining} lectures do not fit before your deadline. Increase pace, study days or daily capacity.",color=Palette.gold)
             Body(if (forecast?.remaining==0) "All configured lectures completed." else forecast?.finish?.let { "At your actual recent pace: around ${displayDate(it)}. Based on ${forecast.recent} lectures in 28 calendar days." } ?: "A completion forecast appears after 3 logged lectures in 28 days, with a subject total set.")
         }
-        if (missed.isNotEmpty()) Action("Catch up · ${missed.size} missed targets",secondary=true) { catchUp=true }
+        if (missed.isNotEmpty()) Action("Catch up · ${missed.size} missed targets",secondary=true) { vm.plannerDialog.value=PlannerRequest(exam.id,true) }
         Body("Past days, days with recorded lectures, and locked targets stay in place. Future targets reflect unfinished lectures.")
     }
-    if (settings) ScheduleDialog(w,vm,exam) { settings=false }
-    if (catchUp) Dialog({catchUp=false}) { Card(title="Make room to catch up") {
+}
+data class PlannerRequest(val examId: String, val catchUp: Boolean = false)
+/** Modal state lives outside LazyColumn items so scrolling cannot dispose an open form. */
+@Composable fun PlannerDialogs(w: Workspace, vm: NativeViewModel) {
+    val request by vm.plannerDialog.collectAsStateWithLifecycle()
+    val current=request ?: return
+    val exam=w.state.exams.firstOrNull { it.id==current.examId } ?: return
+    if(current.catchUp) CatchUpDialog(w,vm,exam) { vm.plannerDialog.value=null }
+    else ScheduleDialog(w,vm,exam) { vm.plannerDialog.value=null }
+}
+@Composable private fun CatchUpDialog(w: Workspace, vm: NativeViewModel, exam: Exam, onClose: ()->Unit) {
+    var start by rememberSaveable(exam.id) { mutableStateOf(w.day) }
+    var end by rememberSaveable(exam.id) { mutableStateOf(addDays(w.day,6)) }
+    Dialog(onClose) { Card(title="Make room to catch up") {
         Body("Available slots in this window are reserved and locked for missed work. Original days stay visible; work that does not fit stays overdue. Daily pace, weekdays and capacity still apply.")
         DateField("Resume from",start,{start=it}); DateField("Plan through",end,{end=it})
         Action("Redistribute remaining lectures") { vm.perform(false) {
             require(start>=w.day && validDate(start) && validDate(end) && end>=start) { "Choose a future date range." }
-            vm.repo.edit("Future targets redistributed. Original missed days preserved.") { state ->
-                redistributeMissed(state,w.day,start,end,exam.id)
-            }; catchUp=false
+            vm.repo.edit("Future targets redistributed. Original missed days preserved.") { state -> redistributeMissed(state,w.day,start,end,exam.id) }
+            onClose()
         } }
-        Action("Close",secondary=true) { catchUp=false }
+        Action("Close",secondary=true,onClick=onClose)
     } }
 }
 @Composable private fun ScheduleDialog(w: Workspace, vm: NativeViewModel, exam: Exam, onClose: ()->Unit) {
@@ -68,7 +76,7 @@ import kotlinx.coroutines.withContext
     var days by rememberSaveable { mutableStateOf(saved.weekdays.toSet()) }
     var rests by rememberSaveable { mutableStateOf(saved.restDates.joinToString(", ")) }
     var limit by rememberSaveable { mutableStateOf(saved.dailyLimit?.toString().orEmpty()) }
-    val roots=w.index.children[null].orEmpty()
+    val roots=w.state.topics.filter { it.examId==exam.id && it.parentId==null }
     var paces by rememberSaveable { mutableStateOf(roots.associate { it.id to (it.schedulePace ?: 0).toString() }) }
     var modes by rememberSaveable { mutableStateOf(roots.associate { it.id to it.paceMode }) }
     Dialog(onClose,properties=DialogProperties(usePlatformDefaultWidth=false)) {

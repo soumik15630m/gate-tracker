@@ -71,7 +71,7 @@ import kotlinx.coroutines.withContext
         if (error.isNotBlank()) Body(error, Modifier.padding(horizontal = 22.dp, vertical = 8.dp), Palette.danger)
         if (onSave != null) {
             HorizontalDivider(color = Palette.border)
-            Action(if (busy) "Saving…" else saveLabel, Modifier.fillMaxWidth().padding(20.dp), enabled = !busy, onClick = onSave)
+            Action(if (busy) "Saving…" else saveLabel, Modifier.fillMaxWidth().padding(20.dp).testTag("Save editor"), enabled = !busy, onClick = onSave)
         }
     }
 }

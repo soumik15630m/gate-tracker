@@ -210,8 +210,9 @@ class NativeFlowTest {
         compose.onNodeWithTag("Study block goal").performTextInput("Integration questions")
         compose.onNodeWithTag("Planned duration · minutes").performScrollTo().performTextReplacement("45")
         compose.onNodeWithTag("Detailed steps, resources & outcome").performScrollTo().performTextInput("Solve 15 questions and revise errors")
-        compose.onNodeWithText("Save", useUnmergedTree = true).performClick()
-        settled { vm.workspace.value.tasks.any { it.type == "plan" } }
+        compose.onNodeWithTag("Save editor").assertIsDisplayed().performClick()
+        settled { vm.workspace.value.tasks.any { it.type == "plan" } || vm.workingError.value.isNotBlank() }
+        assertEquals("",vm.workingError.value)
         val plan = vm.workspace.value.tasks.single { it.type == "plan" }
         assertEquals(45, plan.minutes); assertTrue(plan.notes!!.contains("15 questions")); assertTrue(vm.workspace.value.sessions.isEmpty())
         compose.runOnIdle { vm.open(Editor.QuickRevision) }

@@ -57,7 +57,9 @@ class AutomaticPlanFlowTest {
         compose.onNodeWithText("Your daily agenda").assertExists()
         compose.runOnIdle { vm.screen.value=Screen.PLAN }
         compose.onNodeWithTag("Plan content").performScrollToNode(hasText("Scheduling preferences"))
-        compose.onNodeWithText("Scheduling preferences").performClick()
+        compose.onNodeWithText("Scheduling preferences").performScrollTo().assertIsDisplayed().performClick()
+        settled { vm.plannerDialog.value?.examId==exam.id }
+        settled { compose.onAllNodesWithText("Your study rhythm").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Your study rhythm").assertExists()
         compose.onNodeWithText("Close",useUnmergedTree=true).performClick()
     }

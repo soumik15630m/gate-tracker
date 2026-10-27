@@ -120,6 +120,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
     val workingError = MutableStateFlow("")
     val stopwatch = (application as StudyspaceApplication).stopwatch
     val sharedStopwatch = (application as StudyspaceApplication).sharedStopwatch
+    val plannerDialog = MutableStateFlow<PlannerRequest?>(null)
     val focusDial = MutableStateFlow(false)
     val notificationOptions = MutableStateFlow(0)
     val updater = NativeUpdater(application)
@@ -200,6 +201,7 @@ class NativeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     if (editor != null) NativeEditor(editor!!, workspace, vm)
+    PlannerDialogs(workspace,vm)
 }
 
 @Composable private fun ExamSwitcher(w: Workspace, vm: NativeViewModel) {
