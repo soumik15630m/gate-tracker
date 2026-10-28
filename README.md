@@ -76,6 +76,12 @@ NATIVE_KEY_PASSWORD
 
 Set `STUDYSPACE_API_URL` before compiling to embed a default HTTPS sync-server address. It remains editable in Settings. Use the same server and account on Android and web. For local testing, private LAN HTTP addresses such as `http://192.168.1.20:3001` are supported. Public servers require HTTPS. `localhost` on a physical phone means the phone itself; emulator access to the host is `http://10.0.2.2:3001`.
 
+### Existing accounts after the domain rename
+
+Keep `gate-tracker-blond-two.vercel.app` and `stkgatetracker.vercel.app` as direct production aliases of the same Vercel project and deployment. Do not configure an HTTP redirect on the old domain: Android deliberately rejects sync redirects, while browser preflights and authorization can fail across redirects. Existing accounts, session tokens and timers use the same backend through either alias. Keep saved server URLs and account cache keys intact so pending offline edits are retained.
+
+Production `ALLOWED_ORIGINS` must include both exact HTTPS origins, separated by a comma. Redeploy after changing that environment variable. This allows the current web page to reach an account's saved legacy sync URL while continuing to reject unrelated origins and require authentication. After changing domains or deploying, run `npm run check:sync-origins`; it checks direct API responses, cross-origin preflights, authentication requirements and rejection of an untrusted origin without creating an account or changing any study data.
+
 ### Migration from the former Expo Android app
 
 The package ID remains `org.studyspace.app`. A correctly signed upgrade preserves app data and imports recognizable previous AsyncStorage workspace caches into Room without modifying the old database. Account caches remain isolated by server and user. Sign in again to reconnect synchronization. Export a JSON backup before upgrading, especially if your old APK used a different signing certificate. Uninstalling an app removes its private storage.

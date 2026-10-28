@@ -15,6 +15,7 @@
     "check": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:api": "node --test tests/api.test.mjs tests/tenant-isolation.test.mjs tests/shared-timer.test.mjs tests/lecture-api.test.mjs tests/planning-api.test.mjs",
+    "check:sync-origins": "node scripts/check-sync-origins.mjs",
     "test:android": "node scripts/build-native-apk.mjs --test",
     "apk": "node scripts/build-native-apk.mjs"
   },
